@@ -16,7 +16,7 @@ fn identifier(value: &str) -> Result<()> {
         || value.len() > 160
         || !value
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.:~".contains(&b))
     {
         return Err(Error::refused(
             "Snapshot identifiers must be bounded opaque ASCII identifiers.",
@@ -103,7 +103,9 @@ impl Snapshot {
         let installation = record.installation_id.as_deref().ok_or_else(|| {
             Error::refused("A name proposal requires an existing installation ID.")
         })?;
-        if record.kind != "personal"
+        let personal = record.kind == "personal"
+            || (record.kind == "user" && record.computer_type.as_deref() == Some("app_connection"));
+        if !personal
             || !matches!(record.status.as_deref(), Some("connected" | "offline"))
             || record.display_name.as_ref().is_none_or(|s| s.is_empty())
             || records()

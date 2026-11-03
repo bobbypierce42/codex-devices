@@ -33,6 +33,47 @@ fn bytes(value: &Value) -> Vec<u8> {
 }
 
 #[test]
+fn user_app_connection_is_preserved_and_other_user_types_are_refused() {
+    let root = scratch();
+    let mut before = snapshot();
+    before["source"]["dot_id"] = json!("demo-dot~demo-scope");
+    before["pages"][0]["computers"][1]["kind"] = json!("user");
+    before["pages"][0]["computers"][1]["computer_type"] = json!("app_connection");
+    before["pages"][0]["inventory_metadata"] =
+        json!({"local_computer_access_disabled_by_admin": false});
+    let input = bytes(&before);
+    let path = root.join("proposal");
+    let receipt =
+        prepare_name_proposal(&input, "demo-active-laptop", "Field laptop", &path).unwrap();
+    assert_eq!(std::fs::read(path.join("before.json")).unwrap(), input);
+    assert!(!receipt.apply_supported);
+    let mut after = before.clone();
+    after["pages"][0]["computers"][1]["display_name"] = json!("Field laptop");
+    assert!(verify_name_proposal(&path, &receipt.plan_sha256, Some(&bytes(&after))).is_ok());
+    after["pages"][0]["inventory_metadata"]["local_computer_access_disabled_by_admin"] =
+        json!(true);
+    assert!(verify_name_proposal(&path, &receipt.plan_sha256, Some(&bytes(&after))).is_err());
+    for (i, computer_type) in [Value::Null, json!("unknown"), json!("cloud")]
+        .into_iter()
+        .enumerate()
+    {
+        let mut invalid = before.clone();
+        invalid["pages"][0]["computers"][1]["computer_type"] = computer_type;
+        let path = root.join(format!("refused-user-{i}"));
+        assert!(
+            prepare_name_proposal(
+                &bytes(&invalid),
+                "demo-active-laptop",
+                "Field laptop",
+                &path
+            )
+            .is_err()
+        );
+        assert!(!path.exists());
+    }
+}
+
+#[test]
 fn proposal_saves_exact_input_and_only_the_existing_id_and_name_in_its_request() {
     use std::os::unix::fs::PermissionsExt;
     let root = scratch();
