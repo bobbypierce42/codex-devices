@@ -2,6 +2,7 @@
 
 mod cleanup;
 mod encoding;
+mod name_proposal;
 mod storage;
 
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub use cleanup::{
     prepare_cleanup, prepare_rename, verify_cleanup, verify_operation,
 };
 pub use encoding::json_bytes;
+pub use name_proposal::{NameProposalReceipt, prepare_name_proposal, verify_name_proposal};
 pub use storage::{BackupReceipt, Verification, backup, read_input, verify};
 
 pub const DEMO: &[u8] = include_bytes!("../fixtures/synthetic-catalog.json");
@@ -177,6 +179,7 @@ fn reject_credentials(value: &Value) -> Result<()> {
                     .collect();
                 if [
                     "token",
+                    "authtoken",
                     "accesstoken",
                     "refreshtoken",
                     "idtoken",
@@ -192,7 +195,7 @@ fn reject_credentials(value: &Value) -> Result<()> {
                 .contains(&normalized.as_str())
                 {
                     return Err(Error::refused(
-                        "Credential-bearing fields are not allowed in synthetic catalogs.",
+                        "Credential-bearing fields are not allowed in catalog inputs.",
                     ));
                 }
                 reject_credentials(value)?;

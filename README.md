@@ -5,8 +5,9 @@ old names, retired registrations, duplicate labels, and identities copied during
 machine migration. The project develops a reviewed audit, backup, rename,
 cleanup, and verification workflow for one person with several computers.
 
-**Development preview:** catalog operations use invented data and change a local
-simulation. Optional macOS diagnostics read existing sign-in metadata. Live
+**Development preview:** catalog mutations use invented data and change a local
+simulation. Explicit operator captures can produce offline name-only request
+proposals. Optional macOS diagnostics read existing sign-in metadata. Live
 registry inventory, live rename, and live cleanup are not implemented. This
 project is independent of OpenAI.
 
@@ -123,6 +124,32 @@ installation IDs, environment IDs, and access grants stay guarded. Names are
 trimmed, limited to 100 UTF-16 code units, and reject control characters. The
 demo's rename permission is invented and does not qualify a service API.
 
+### Prepare a name-only request proposal
+
+An explicit operator capture can produce a private proposal for one existing
+registration. The file uses the same schema-v1 paginated envelope as the fixture,
+with `source.kind` set to `operator-snapshot`. This label is a provenance statement,
+not authentication. Known IDs must be unique; all pages must be present. This
+command never retrieves a capture, reads identity files, or contacts a service:
+
+```sh
+codex-devices rename --snapshot capture.json \
+  --set 'FULL_ENVIRONMENT_ID=Field laptop' --out demo-output/name-proposal --json
+codex-devices verify --name-proposal demo-output/name-proposal \
+  --expected-plan-sha256 REVIEWED_HASH --json
+```
+
+Preparation saves exact `before.json` bytes and an anchored `plan.json` with the
+existing installation ID and proposed custom name. The receipt exposes only the
+installation fingerprint. The observed internal request contract is unqualified;
+there is no live apply transport. Both commands return `4`, with
+`apply_supported=false` and `live_state_verified=false`.
+
+Add `--input after-capture.json` to verification to compare an explicit later
+capture. Only the selected display name may differ; all other metadata, records,
+IDs, access fields, and array order must remain unchanged. Matching supplied
+captures does not prove live service state. Keep captures and proposals private.
+
 ### Review a cleanup
 
 Prepare removal of two specific offline fixture records:
@@ -201,6 +228,7 @@ The development scope is:
 | Synthetic workflows | Tested on macOS ARM64 |
 | Local sign-in diagnostic | Observed with bundled CLI `0.166.0-alpha.5.1` on one Mac |
 | SSH diagnostic | Mock-tested; real peer execution remains unqualified |
+| Name-only request proposals | Offline operator captures; live transport and capability unqualified |
 | Linux and Windows | Not qualified; Windows protected artifact operations refuse |
 | Live registry editing, identity repair, plugin | Not implemented |
 

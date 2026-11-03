@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod journal;
 mod rename;
 use journal::{Event, Journal, RequestState};
+pub(crate) use rename::validated_name;
 pub use rename::{RenameChange, prepare_rename};
 
 #[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

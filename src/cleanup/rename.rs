@@ -13,7 +13,7 @@ pub struct RenameChange {
     pub new_name: String,
 }
 
-pub(super) fn validated_name(name: &str) -> Result<String> {
+pub(crate) fn validated_name(name: &str) -> Result<String> {
     let has_controls = name.chars().any(char::is_control);
     let name = name.trim();
     if name.is_empty() || name.encode_utf16().count() > 100 || has_controls {

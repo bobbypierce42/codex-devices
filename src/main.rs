@@ -1,8 +1,9 @@
 #![forbid(unsafe_code)]
 
 use codex_devices::{
-    AuditReport, OperationReceipt, Result, apply_cleanup, apply_rename, audit, backup, json_bytes,
-    prepare_cleanup, prepare_rename, verify, verify_operation,
+    AuditReport, NameProposalReceipt, OperationReceipt, Result, apply_cleanup, apply_rename, audit,
+    backup, json_bytes, prepare_cleanup, prepare_name_proposal, prepare_rename, read_input, verify,
+    verify_name_proposal, verify_operation,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -27,6 +28,8 @@ const HELP: &str = "codex-devices 0.1.0 | synthetic workflows and Mac sign-in di
                        --out NEW_OPERATION_DIRECTORY [--json]
   codex-devices rename (--apply | --resume) OPERATION --approve-plan-sha256 HEX [--json]
   codex-devices verify --operation DIRECTORY [--expected-plan-sha256 HEX] [--json]
+  codex-devices rename --snapshot FILE --set FULL_ID=NAME --out NEW_DIRECTORY [--json]
+  codex-devices verify --name-proposal DIRECTORY --expected-plan-sha256 HEX [--input AFTER] [--json]
 
 Catalog workflows accept synthetic schema-v1 files with demo- identifiers only.
 Cleanup and rename preparation are preview-only. Apply writes the private service copy and
@@ -34,6 +37,9 @@ journal inside the operation; source input and backup stay unchanged. Review pla
 and keep its digest separately. Resume reconciles interrupted intents first.
 Rename preserves installation IDs and requires an invented can_rename grant.
 Names are trimmed and limited to 100 UTF-16 code units, without control characters.
+--snapshot prepares an offline name-only request proposal from an operator-snapshot
+catalog. It saves the exact capture privately and has no live apply transport.
+Proposal verification compares supplied files only; its partial/unknown exit is 4.
 The optional macOS --local/--peer audit reads native sign-in metadata only.
 --peer uses existing SSH configuration, keys and trusted host keys. It requires
 an explicit remote app-server path. No discovery, key enrollment or installation.
@@ -55,6 +61,43 @@ fn output(value: &impl Serialize, human: &str, as_json: bool) -> Result<()> {
     stdout.write_all(&bytes)?;
     stdout.write_all(b"\n")?;
     Ok(())
+}
+
+fn name_proposal_output(mut receipt: NameProposalReceipt, as_json: bool) -> Result<i32> {
+    let human = format!(
+        "NAME-ONLY PROPOSAL | {}\nEnvironment: {:?}\nName: {:?} -> {:?}\nInstallation fingerprint: {}\nPrivate proposal: {:?}\nPlan SHA-256: {}\n{}",
+        receipt.status,
+        receipt.environment_id,
+        receipt.old_name,
+        receipt.new_name,
+        receipt.installation_id_sha256,
+        receipt.proposal_directory,
+        receipt.plan_sha256,
+        receipt.reason
+    );
+    match output(&receipt, &human, as_json) {
+        Err(error) if as_json && error.kind == "refused" => {
+            #[derive(Serialize)]
+            struct Summary<'a> {
+                #[serde(flatten)]
+                receipt: &'a NameProposalReceipt,
+                review_details_omitted: [&'static str; 1],
+                review_details_file: &'static str,
+            }
+            receipt.old_name.clear();
+            output(
+                &Summary {
+                    receipt: &receipt,
+                    review_details_omitted: ["old_name"],
+                    review_details_file: "plan.json",
+                },
+                "",
+                true,
+            )?;
+        }
+        result => result?,
+    }
+    Ok(4)
 }
 
 fn run(Invocation { command, json }: Invocation) -> Result<i32> {
@@ -97,6 +140,30 @@ fn run(Invocation { command, json }: Invocation) -> Result<i32> {
             out,
             changes,
         } => operation_output(prepare_rename(&source.read()?, &changes, &out)?, json),
+        Command::PrepareNameProposal {
+            snapshot,
+            out,
+            change,
+        } => name_proposal_output(
+            prepare_name_proposal(
+                &read_input(&snapshot)?,
+                &change.environment_id,
+                &change.new_name,
+                &out,
+            )?,
+            json,
+        ),
+        Command::VerifyNameProposal {
+            directory,
+            expected,
+            after,
+        } => {
+            let after = after.as_deref().map(read_input).transpose()?;
+            name_proposal_output(
+                verify_name_proposal(&directory, &expected, after.as_deref())?,
+                json,
+            )
+        }
         Command::ApplyRename {
             directory,
             approved,
