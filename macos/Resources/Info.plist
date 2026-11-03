@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>CodexDevices</string>
+    <key>CFBundleIdentifier</key><string>org.codex-devices.desktop</string>
+    <key>CFBundleName</key><string>Codex Devices</string>
+    <key>CFBundleDisplayName</key><string>Codex Devices</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Discover Macs advertising SSH so you can inspect and compare their Codex computer names.</string>
+    <key>NSBonjourServices</key><array><string>_ssh._tcp</string></array>
+</dict>
+</plist>

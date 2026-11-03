@@ -1,7 +1,8 @@
 # Contributing
 
 Contributions are welcome through issues and pull requests. The project keeps
-one Rust package and a small command-line interface. macOS comes first.
+one Rust package and a native macOS interface built with Apple's frameworks.
+macOS comes first.
 
 ## Set up a development checkout
 
@@ -17,9 +18,23 @@ one Rust package and a small command-line interface. macOS comes first.
    cargo build --locked --release
    ```
 
-CI repeats these checks on stable Rust and Rust 1.89, and uses pinned cargo-audit
-to check Cargo.lock against the RustSec advisory database. The Linux audit job
-does not establish Linux support for the application.
+For native app changes, install full Xcode and run these additional checks after
+building the release Rust engine:
+
+```sh
+swift test --package-path macos
+./script/build_and_run.sh --build-only
+```
+
+If standalone command-line tools are selected, prefix each command with
+`DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for that invocation.
+The bundle build does not launch the app or contact an account or remote Mac.
+
+CI repeats the Rust checks on stable Rust and Rust 1.89, runs native synthetic
+tests and builds the app on the stable job, and uses pinned cargo-audit to check
+Cargo.lock against the RustSec advisory database. The Linux audit job does not
+establish Linux support for the application. CI does not verify the real GUI,
+SSH authentication, live account behavior, signing, or notarization.
 
 Tests use synthetic data and explicit temporary paths. They must not access
 real authentication stores, installation identities, accounts, or remote hosts.

@@ -8,7 +8,7 @@ use codex_devices::{
 use serde::Serialize;
 use serde_json::json;
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 
 mod cli;
 mod local;
@@ -286,6 +286,27 @@ fn operation_output(mut receipt: OperationReceipt, as_json: bool) -> Result<i32>
 
 fn main() {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if args.len() == 1 && args[0] == "desktop" {
+        let mut input = Vec::new();
+        let result = io::stdin()
+            .take(codex_devices::MAX_BYTES + 1)
+            .read_to_end(&mut input);
+        let (receipt, code) = match result {
+            Ok(_) => codex_devices::desktop(&input),
+            Err(_) => (b"{\"schema_version\":1,\"op\":\"unknown\",\"status\":\"refused\",\"reason_code\":\"io\"}".to_vec(), 1),
+        };
+        let mut stdout = io::stdout().lock();
+        let code = if stdout
+            .write_all(&receipt)
+            .and_then(|()| stdout.flush())
+            .is_ok()
+        {
+            code
+        } else {
+            1
+        };
+        std::process::exit(code);
+    }
     if args.len() == 1 && args[0] == "--version" {
         println!(
             "codex-devices {} (synthetic workflows; Mac metadata diagnostics)",

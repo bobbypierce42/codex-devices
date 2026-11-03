@@ -44,6 +44,12 @@ jobs:
         run: cargo +${{ matrix.rust }} test --locked
       - name: Build release executable
         run: cargo +${{ matrix.rust }} build --locked --release
+      - name: Test native app with synthetic providers
+        if: matrix.rust == 'stable'
+        run: swift test --package-path macos
+      - name: Build native app bundle without launching
+        if: matrix.rust == 'stable'
+        run: ./script/build_and_run.sh --build-only
 
   advisories:
     name: dependency-audit

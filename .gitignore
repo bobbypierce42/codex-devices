@@ -1,5 +1,8 @@
 .DS_Store
 /target/
+/dist/
+/macos/.build/
+/macos/.swiftpm/
 /.gsd/
 /.local/
 /.planning/

@@ -1,15 +1,65 @@
 # codex-devices
 
-A small Rust command-line tool for investigating cluttered Codex computer lists:
+A native macOS app and Rust command-line tool for investigating Codex computer lists:
 old names, retired registrations, duplicate labels, and identities copied during
 machine migration. The project develops a reviewed audit, backup, rename,
 cleanup, and verification workflow for one person with several computers.
 
-**Development preview:** catalog mutations use invented data and change a local
-simulation. Explicit operator captures can produce offline name-only request
-proposals. Optional macOS diagnostics read existing sign-in metadata. Live
-registry inventory, live rename, and live cleanup are not implemented. This
-project is independent of OpenAI.
+**Development preview:** the native macOS app provides discovery, SSH inspection,
+name comparison and reviewed name-only repair through an experimental internal
+API. Live compatibility and end-to-end acceptance require separate verification.
+CLI demos use invented data and a local simulation. Live cleanup is not
+implemented. This project is independent of OpenAI.
+
+## Native macOS app
+
+Build on macOS 13 or later with the Xcode command-line tools, Swift 5.9 or later,
+and the Rust toolchain. No third-party Swift packages are required:
+
+```sh
+./script/build_and_run.sh --build-only
+open 'dist/Codex Devices.app'
+```
+
+The bundle embeds the native interface, Rust verification engine and SSH
+authentication helper. Normal use requires no pasted scripts or CLI installation
+on each Mac. Run `./script/build_and_run.sh` to rebuild and launch; add `--demo`
+for invented computers, injected services and simulated engine receipts. The
+demo uses an explicit temporary path but creates no real backup or service write.
+`--verify` checks process startup; it does not establish repair acceptance.
+
+1. Choose **Scan**, or add a Mac hostname and choose **Add & Scan**. Discovery
+   uses Bonjour and an existing Tailscale installation when available.
+2. Choose **Inspect** for a Mac. Existing SSH access is required. The app shows
+   an unknown host's public fingerprint for explicit trust and uses a native
+   secure password prompt when SSH requests authentication. Changed keys refuse.
+3. Compare the inspected system name with the Codex name. Only a unique
+   installation fingerprint match can be selected. Edit the proposed name if
+   needed; repeated occurrences across Dots remain one selection.
+4. Choose **Review**, check the exact old/new names and private backup folder,
+   confirm the preservation conditions, then choose **Repair Selected**.
+5. **Verified** requires a fresh complete readback with the selected names changed
+   and identities, access, attachments and unselected records preserved. An
+   uncertain result offers **Check Readback** without repeating the write.
+
+Private backups and operation journals are retained under
+`~/Library/Application Support/Codex Devices/Operations`. They contain exact
+registry captures and reviewed plans. Keep them private and retain them if an
+operation stops. Passwords are neither saved nor written to artifacts. Existing
+Codex sign-in is used without login, logout or forced refresh. No installation
+ID is rotated, and no stale registration is deleted.
+
+The internal API is unsupported and can change. A successful build, fixture run
+or app launch does not establish live SSH, account or repair compatibility. Native
+window and live repair acceptance remain separately qualified. Native tests use
+invented providers, explicit temporary paths and the built Rust engine. XCTest
+requires full Xcode. If standalone command-line tools are selected, choose Xcode
+for this invocation only:
+
+```sh
+cargo build --locked --release
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path macos
+```
 
 ## The problem
 
@@ -230,7 +280,8 @@ The development scope is:
 | SSH diagnostic | Mock-tested; real peer execution remains unqualified |
 | Name-only request proposals | Offline operator captures; live transport and capability unqualified |
 | Linux and Windows | Not qualified; Windows protected artifact operations refuse |
-| Live registry editing, identity repair, plugin | Not implemented |
+| Native macOS name-only repair | Experimental internal API; live acceptance separately required |
+| Live cleanup, identity repair, plugin | Not implemented |
 
 Input, encoded artifacts, journals, and JSON receipts are bounded to 4 MiB;
 catalogs are limited to 4096 records. Private artifacts use owner/mode checks,

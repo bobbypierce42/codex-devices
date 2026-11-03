@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod cleanup;
+mod desktop;
 mod encoding;
 mod name_proposal;
 mod storage;
@@ -15,6 +16,7 @@ pub use cleanup::{
     CleanupReceipt, OperationReceipt, RenameChange, RenameReceipt, apply_cleanup, apply_rename,
     prepare_cleanup, prepare_rename, verify_cleanup, verify_operation,
 };
+pub use desktop::desktop;
 pub use encoding::json_bytes;
 pub use name_proposal::{NameProposalReceipt, prepare_name_proposal, verify_name_proposal};
 pub use storage::{BackupReceipt, Verification, backup, read_input, verify};
