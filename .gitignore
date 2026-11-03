@@ -1,0 +1,17 @@
+.DS_Store
+/target/
+/.gsd/
+/.local/
+/.planning/
+/backups/
+/private/
+/artifacts/
+/demo-output/
+.env
+.env.*
+auth.json
+*.log
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*

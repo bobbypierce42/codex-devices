@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rust: stable
+            name: macos-stable
+          - rust: 1.89.0
+            name: macos-msrv
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: >-
+          rustup toolchain install '${{ matrix.rust }}' --profile minimal
+          --component rustfmt --component clippy
+      - name: Check formatting
+        run: cargo +${{ matrix.rust }} fmt --check
+      - name: Lint all targets
+        run: cargo +${{ matrix.rust }} clippy --locked --all-targets -- -D warnings
+      - name: Test synthetic workflows
+        run: cargo +${{ matrix.rust }} test --locked
+      - name: Build release executable
+        run: cargo +${{ matrix.rust }} build --locked --release
+
+  advisories:
+    name: dependency-audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install audit toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Install pinned advisory checker
+        run: cargo +stable install cargo-audit --version 0.22.2 --locked
+      - name: Audit locked dependencies
+        run: cargo +stable audit --deny warnings

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "source": {"kind": "synthetic", "account_id": "demo-user", "dot_id": "demo-dot"},
+  "fixture_note": "Invented records only. No real devices or credentials.",
+  "pages": [
+    {
+      "cursor": null,
+      "thread_id": "demo-thread",
+      "next_cursor": "demo-page-2",
+      "computers": [
+        {"kind": "personal", "environment_id": "demo-active-desktop", "installation_id": "demo-install-desktop", "display_name": "Studio Mac", "computer_type": "macos", "status": "connected", "is_attached": true, "can_use_for_tasks": true, "can_delete": true, "can_rename": true, "selected_capability_roots": ["demo-shell", "demo-files"]},
+        {"kind": "personal", "environment_id": "demo-active-laptop", "installation_id": "demo-install-laptop", "display_name": "old-laptop.example", "computer_type": "macos", "status": "connected", "is_attached": false, "can_use_for_tasks": false, "can_delete": true, "can_rename": true},
+        {"kind": "personal", "environment_id": "demo-retired-01", "installation_id": "demo-install-retired-01", "display_name": "Studio Mac", "computer_type": "macos", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true, "can_rename": true},
+        {"kind": "personal", "environment_id": "demo-retired-02", "installation_id": "demo-install-retired-02", "display_name": "Windows PC", "computer_type": "windows", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true, "can_rename": true},
+        {"kind": "personal", "environment_id": "demo-retired-03", "installation_id": "demo-install-retired-03", "display_name": "Windows PC", "computer_type": "windows", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true, "can_rename": true},
+        {"kind": "personal", "environment_id": "demo-retired-04", "installation_id": "demo-install-retired-04", "display_name": "Old Linux box", "computer_type": "linux", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true}
+      ]
+    },
+    {
+      "cursor": "demo-page-2",
+      "thread_id": "demo-thread",
+      "next_cursor": null,
+      "computers": [
+        {"kind": "personal", "environment_id": "demo-retired-05", "installation_id": "demo-install-retired-05", "display_name": "Retired workstation", "computer_type": "linux", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true},
+        {"kind": "personal", "environment_id": "demo-retired-06", "installation_id": "demo-install-retired-06", "display_name": "Old home server", "computer_type": "linux", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true},
+        {"kind": "personal", "environment_id": "demo-retired-07", "installation_id": "demo-install-retired-07", "display_name": null, "computer_type": "unknown", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true, "future_metadata": {"note": "Preserve this unknown field"}},
+        {"kind": "personal", "environment_id": "demo-retired-08", "installation_id": "demo-install-copied", "display_name": "Migrated desktop", "computer_type": "macos", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true},
+        {"kind": "personal", "environment_id": "demo-retired-09", "installation_id": "demo-install-copied", "display_name": "Migrated desktop", "computer_type": "macos", "status": "offline", "is_attached": false, "can_use_for_tasks": false, "can_delete": true},
+        {"kind": "cloud", "environment_id": "demo-cloud", "installation_id": null, "display_name": "Synthetic cloud computer", "computer_type": "linux", "status": "ready", "is_attached": false, "can_use_for_tasks": false, "can_delete": false}
+      ]
+    }
+  ]
+}
