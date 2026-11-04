@@ -129,6 +129,41 @@ final class DiscoverySSHTests: XCTestCase {
         let peer = try await service.inspect(fixtureHost, user: "synthetic-user")
         XCTAssertEqual(peer.computerName, "Studio")
     }
+    func testPinnedHostLookupOverridesAnAmbientHostKeyAlias() async throws {
+        let root = try temporaryDirectory(), configuration = root.appendingPathComponent("ssh-config")
+        try Data("Host studio.example\n    HostKeyAlias invented-unrelated-alias\n".utf8).write(to: configuration)
+        let key = "studio.example ssh-ed25519 \(Data("synthetic-host-key".utf8).base64EncodedString())\n"
+        let service = SSHService(helperURL: URL(fileURLWithPath: "/fixture/helper"), trustDirectory: root.appendingPathComponent("trust"), runner: { request in
+            if request.executable.lastPathComponent == "ssh-keyscan" { return .init(status: 0, output: Data(key.utf8)) }
+            if request.executable.lastPathComponent == "ssh-keygen" { return .init(status: 0, output: Data("256 SHA256:fixture studio.example (ED25519)\n".utf8)) }
+            let parsed = try await NativeProcess.run(.init(executable: URL(fileURLWithPath: "/usr/bin/ssh"), arguments: ["-G", "-F", configuration.path, "-oCanonicalizeHostname=no"] + request.arguments))
+            XCTAssertEqual(parsed.status, 0)
+            let lines = String(decoding: parsed.output, as: UTF8.self).split(separator: "\n")
+            XCTAssertEqual(lines.first(where: { $0.hasPrefix("hostkeyalias ") }), "hostkeyalias studio.example")
+            XCTAssertTrue(lines.contains("stricthostkeychecking true"))
+            return .init(status: 0, output: Data("\(Data("Studio".utf8).base64EncodedString())\n\(DeviceServices.hash(fixtureInstallation))\n".utf8))
+        }, trust: { _ in true })
+        let peer = try await service.inspect(fixtureHost, user: "synthetic-user")
+        XCTAssertEqual(peer.computerName, "Studio")
+    }
+    func testRemoteInspectionUsesPOSIXShellWithZshLoginShell() async throws {
+        let root = try temporaryDirectory()
+        let key = "studio.example ssh-ed25519 \(Data("synthetic-host-key".utf8).base64EncodedString())\n"
+        let service = SSHService(helperURL: URL(fileURLWithPath: "/fixture/helper"), trustDirectory: root, runner: { request in
+            if request.executable.lastPathComponent == "ssh-keyscan" { return .init(status: 0, output: Data(key.utf8)) }
+            if request.executable.lastPathComponent == "ssh-keygen" { return .init(status: 0, output: Data("256 SHA256:fixture studio.example (ED25519)\n".utf8)) }
+            XCTAssertEqual(request.arguments.last, "/bin/sh -s")
+            guard request.arguments.last == "/bin/sh -s" else { throw ServiceError.refused }
+            XCTAssertEqual(request.input, Data(SSHService.inspectionCommand.utf8))
+            let fixtureScript = Data("set -eu\nbefore='501 1 37 600'\nset -- $before\ntest \"$1\" = 501\nprintf synthetic-posix-result\n".utf8)
+            let parsed = try await NativeProcess.run(.init(executable: URL(fileURLWithPath: "/bin/zsh"), arguments: ["-f", "-c", request.arguments.last!], environment: ["HOME": root.path], input: fixtureScript))
+            XCTAssertEqual(parsed.status, 0)
+            XCTAssertEqual(String(decoding: parsed.output, as: UTF8.self), "synthetic-posix-result")
+            return .init(status: 0, output: Data("\(Data("Studio".utf8).base64EncodedString())\n\(DeviceServices.hash(fixtureInstallation))\n".utf8))
+        }, trust: { _ in true })
+        let peer = try await service.inspect(fixtureHost, user: "synthetic-user")
+        XCTAssertEqual(peer.computerName, "Studio")
+    }
     func testKnownHostsConfigurationRefusesQuotesBackslashesAndControls() {
         for path in ["/private/tmp/synthetic\"path/known_hosts", "/private/tmp/synthetic\\path/known_hosts", "/private/tmp/synthetic\npath/known_hosts"] {
             XCTAssertThrowsError(try SSHService.knownHostsOption(URL(fileURLWithPath: path))) { XCTAssertEqual($0 as? ServiceError, .refused) }

@@ -48,12 +48,12 @@ public struct SSHService: Sendable {
             defer { try? handle.close() }
             try handle.seekToEnd(); try handle.write(contentsOf: Data(key.utf8)); try handle.synchronize()
         }
-        var arguments = ["-T", "-oStrictHostKeyChecking=yes", knownHostsOption, "-oGlobalKnownHostsFile=/dev/null", "-oUpdateHostKeys=no", "-oConnectTimeout=5", "-oPermitLocalCommand=no", "-oClearAllForwardings=yes", "-oForwardAgent=no", "-oForwardX11=no", "-oControlMaster=no", "-oControlPath=none", "-oNumberOfPasswordPrompts=1"]
+        var arguments = ["-T", "-oStrictHostKeyChecking=yes", "-oHostKeyAlias=\(candidate.host)", knownHostsOption, "-oGlobalKnownHostsFile=/dev/null", "-oUpdateHostKeys=no", "-oConnectTimeout=5", "-oPermitLocalCommand=no", "-oClearAllForwardings=yes", "-oForwardAgent=no", "-oForwardX11=no", "-oControlMaster=no", "-oControlPath=none", "-oNumberOfPasswordPrompts=1"]
         if !user.isEmpty { arguments += ["-l", user] }
-        arguments += ["--", candidate.host, Self.inspectionCommand]
+        arguments += ["--", candidate.host, "/bin/sh -s"]
         let environment = ["SSH_ASKPASS": helperURL.path, "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": "codex-devices:0", "CODEX_DEVICES_ASKPASS_SESSION": UUID().uuidString, "CODEX_DEVICES_ASKPASS_DEADLINE": String(Int(Date().timeIntervalSince1970 + 60)), "CODEX_DEVICES_SSH_HOST": context.host, "CODEX_DEVICES_SSH_USER": context.user]
         SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh"), .sshBegin)
-        let result = try await runner(ProcessRequest(executable: URL(fileURLWithPath: "/usr/bin/ssh"), arguments: arguments, environment: environment, timeout: 75, outputLimit: 8192))
+        let result = try await runner(ProcessRequest(executable: URL(fileURLWithPath: "/usr/bin/ssh"), arguments: arguments, environment: environment, input: Data(Self.inspectionCommand.utf8), timeout: 75, outputLimit: 8192))
         SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh"), .sshReturned, status: result.status)
         return try Self.parseInspection(result, candidate: candidate, hostKey: String(digest))
     }
