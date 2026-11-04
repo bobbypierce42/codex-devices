@@ -23,17 +23,21 @@ building the release Rust engine:
 
 ```sh
 swift test --package-path macos
+./script/build_cli.sh
+./dist/codex-devices-mac --help
 ./script/build_and_run.sh --build-only
 ```
 
 If standalone command-line tools are selected, prefix each command with
 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for that invocation.
-The bundle build does not launch the app or contact an account or remote Mac.
+The CLI and bundle builds do not launch the app or contact an account or remote
+Mac. The native CLI's help is also offline. Account commands are opt-in and
+require a separately scoped live acceptance review.
 
 CI repeats the Rust checks on stable Rust and Rust 1.89, runs native synthetic
-tests and builds the app on the stable job, and uses pinned cargo-audit to check
-Cargo.lock against the RustSec advisory database. The Linux audit job does not
-establish Linux support for the application. CI does not verify the real GUI,
+tests and builds the CLI and app on the stable job, and uses pinned cargo-audit
+to check Cargo.lock against the RustSec advisory database. The Linux audit job
+does not establish Linux support for the application. CI does not verify the real GUI,
 SSH authentication, live account behavior, signing, or notarization.
 
 Tests use synthetic data and explicit temporary paths. They must not access

@@ -78,7 +78,8 @@ public struct OperationReceipt: Codable, Sendable, Equatable {
     public let planSHA256: String
     public let records: [Record]
     public let reasonCode: String
-    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", op, status, operationDirectory = "operation_directory", planSHA256 = "plan_sha256", records, reasonCode = "reason_code" }
+    public let evidenceMode: String?
+    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", op, status, operationDirectory = "operation_directory", planSHA256 = "plan_sha256", records, reasonCode = "reason_code", evidenceMode = "evidence_mode" }
 }
 public enum RepairState: String, Sendable { case idle, scanning, inspecting, ready, preparing, review, applying, verified, uncertain, failed }
 public struct HostTrustChallenge: Sendable { public let host: String; public let fingerprint: String }

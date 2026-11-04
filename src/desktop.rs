@@ -43,6 +43,11 @@ struct Peer {
     host: String,
     computer_name: String,
 }
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+enum EvidenceMode {
+    #[serde(rename = "registry-label")]
+    RegistryLabel,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
@@ -54,6 +59,7 @@ struct Request {
     selections: Option<Vec<Selection>>,
     peers: Option<Vec<Peer>>,
     environment_id: Option<String>,
+    evidence_mode: Option<EvidenceMode>,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +77,8 @@ struct Plan {
     selections: Vec<Selection>,
     peers: Vec<Peer>,
     records: Vec<Row>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evidence_mode: Option<EvidenceMode>,
 }
 #[derive(Serialize)]
 struct ReceiptRow<'a> {
@@ -87,6 +95,8 @@ struct Receipt<'a> {
     plan_sha256: &'a str,
     records: Vec<ReceiptRow<'a>>,
     reason_code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    evidence_mode: Option<EvidenceMode>,
 }
 type GlobalRow = (
     Option<String>,
@@ -307,9 +317,19 @@ impl Aggregate {
             && self.scopes == other.scopes
     }
 }
-fn plan(c: &Capture, selections: Vec<Selection>, peers: Vec<Peer>, before: &[u8]) -> Result<Plan> {
+fn plan(
+    c: &Capture,
+    selections: Vec<Selection>,
+    peers: Vec<Peer>,
+    before: &[u8],
+    mode: Option<EvidenceMode>,
+) -> Result<Plan> {
     let aggregate = Aggregate::parse(c)?;
-    if selections.is_empty() || selections.len() > 4096 || peers.len() != selections.len() {
+    if selections.is_empty()
+        || selections.len() > 4096
+        || (mode.is_none() && peers.len() != selections.len())
+        || (mode.is_some() && !peers.is_empty())
+    {
         return Err(refused());
     }
     let mut selected = BTreeSet::new();
@@ -369,7 +389,7 @@ fn plan(c: &Capture, selections: Vec<Selection>, peers: Vec<Peer>, before: &[u8]
                     && !p.computer_name.is_empty()
             })
             .collect();
-        if matched.len() != 1 {
+        if mode.is_none() && matched.len() != 1 {
             return Err(refused());
         }
         records.push(Row {
@@ -385,6 +405,7 @@ fn plan(c: &Capture, selections: Vec<Selection>, peers: Vec<Peer>, before: &[u8]
         selections,
         peers,
         records,
+        evidence_mode: mode,
     })
 }
 #[derive(Deserialize, Serialize)]
@@ -477,6 +498,7 @@ fn receipt(
         plan_sha256: digest,
         records,
         reason_code: "ok",
+        evidence_mode: plan.evidence_mode,
     })
 }
 fn execute(req: &Request) -> Result<(Vec<u8>, i32)> {
@@ -495,6 +517,7 @@ fn execute(req: &Request) -> Result<(Vec<u8>, i32)> {
             req.selections.clone().ok_or_else(refused)?,
             req.peers.clone().ok_or_else(refused)?,
             &before,
+            req.evidence_mode,
         )?;
         let bytes = compact_json_bytes(&plan)?;
         let digest = sha256(&bytes);
@@ -541,6 +564,7 @@ fn execute(req: &Request) -> Result<(Vec<u8>, i32)> {
         saved_plan.selections.clone(),
         saved_plan.peers.clone(),
         &before,
+        saved_plan.evidence_mode,
     )
     .map_err(|_| integrity())?;
     if compact_json_bytes(&rebuilt)? != saved {
@@ -708,6 +732,11 @@ pub fn desktop(input: &[u8]) -> (Vec<u8>, i32) {
         let raw: Value = serde_json::from_slice(input).map_err(|_| refused())?;
         reject_credentials(&raw)?;
         let req: Request = serde_json::from_slice(input).map_err(|_| refused())?;
+        if raw.get("evidence_mode").is_some()
+            && (req.op != "prepare" || req.evidence_mode.is_none())
+        {
+            return Err(refused());
+        }
         execute(&req)
     })();
     match result {

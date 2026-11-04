@@ -18,13 +18,14 @@ final class RegistryTests: XCTestCase {
     }
     func testExactCompleteCaptureAndAllowedNameOnlyRequest() async throws {
         let fixture = try fixtureCapture()
-        let replies = [HTTPResult(status: 200, data: Data(fixture.rootResponse.utf8))] + fixture.scopes.map { HTTPResult(status: 200, data: Data($0.computersResponse.utf8)) } + [.init(status: 200, data: Data("{}".utf8))]
+        let replies = [HTTPResult(status: 200, data: Data(fixture.rootResponse.utf8))] + fixture.scopes.map { HTTPResult(status: 200, data: Data($0.computersResponse.utf8)) } + [.init(status: 200, data: Data(#"{"executor_id":"env-studio","custom_display_name":"Studio"}"#.utf8))]
         let http = HTTPFixture(replies)
         let client = RegistryClient(transport: { try await http.send($0) })
         let captured = try await client.capture(account: fixtureAccount())
         XCTAssertEqual(captured.rootResponse, fixture.rootResponse)
         XCTAssertEqual(captured.scopes.map(\.computersResponse), fixture.scopes.map(\.computersResponse))
-        try await client.rename(account: fixtureAccount(), installationID: fixtureInstallation, newName: "Studio")
+        let renamed = try await client.rename(account: fixtureAccount(), installationID: fixtureInstallation, newName: "Studio", expectedEnvironmentID: "env-studio")
+        XCTAssertTrue(renamed.validates(environmentID: "env-studio", newName: "Studio"))
         let requests = await http.requests
         XCTAssertEqual(requests.count, 4)
         XCTAssertEqual(requests[0].headers["ChatGPT-Account-Id"], "invented-account")
@@ -124,5 +125,21 @@ final class RegistryTests: XCTestCase {
         try source.write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         await assertServiceError(.unavailable) { _ = try await AppServerSession(executable: script).account() }
+    }
+    func testRenameResponseRequiresExactNameAndDirectOrEncodedExecutorID() async throws {
+        let raw = "ccarenv_synthetic-executor"
+        let encoded = "ccarenv_b64_" + Data(raw.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        for expected in [raw, encoded] {
+            let response: JSONValue = .object(["executor_id": .string(raw), "custom_display_name": .string("Studio"), "ignored_credential": .string("invented-not-retained")])
+            let client = RegistryClient(transport: { _ in .init(status: 200, data: try response.data()) })
+            let receipt = try await client.rename(account: fixtureAccount(), installationID: fixtureInstallation, newName: "Studio", expectedEnvironmentID: expected)
+            XCTAssertEqual(receipt.executorID, raw)
+            XCTAssertFalse(String(describing: receipt).contains("invented-not-retained"))
+        }
+        let mismatch: JSONValue = .object(["executor_id": .string("other-executor"), "custom_display_name": .string("Studio")])
+        await assertServiceError(.drift) { _ = try await RegistryClient(transport: { _ in .init(status: 200, data: try mismatch.data()) }).rename(account: fixtureAccount(), installationID: fixtureInstallation, newName: "Studio", expectedEnvironmentID: encoded) }
+        for response in [JSONValue.object(["executor_id": .string(raw), "custom_display_name": .string("Wrong")]), .object(["executor_id": .string(""), "custom_display_name": .string("Studio")]), .object([:])] {
+            await assertServiceError(.invalidResponse) { _ = try await RegistryClient(transport: { _ in .init(status: 200, data: try response.data()) }).rename(account: fixtureAccount(), installationID: fixtureInstallation, newName: "Studio", expectedEnvironmentID: raw) }
+        }
     }
 }

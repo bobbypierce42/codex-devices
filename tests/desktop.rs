@@ -329,3 +329,70 @@ fn missing_selected_fields_and_wrong_optional_types_refuse() {
         assert_eq!(prepare(&path(), &capture, &peers).0, 3, "invalid {field}");
     }
 }
+
+#[test]
+fn registry_label_requires_explicit_mode_and_preserves_capture_guards() {
+    let (mut capture, peers) = fixture();
+    let p = path();
+    let base = json!({"schema_version":1,"op":"prepare","operation_directory":p,"capture":capture,"selections":[{"environment_id":"env-a","new_name":"New"}],"peers":[]});
+    assert_eq!(invoke(&base).0, 3);
+    let mut invalid = base.clone();
+    invalid["evidence_mode"] = json!("unknown");
+    assert_eq!(invoke(&invalid).0, 3);
+    invalid["evidence_mode"] = json!("registry-label");
+    invalid["peers"] = peers;
+    assert_eq!(invoke(&invalid).0, 3);
+    let mut request = base;
+    request["evidence_mode"] = json!("registry-label");
+    let (code, prepared) = invoke(&request);
+    assert_eq!(code, 0);
+    assert_eq!(prepared["evidence_mode"], "registry-label");
+    let digest = &prepared["plan_sha256"];
+    let intent = |capture: &Value| json!({"schema_version":1,"op":"intent","operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture,"peers":[]});
+    let preflight = json!({"schema_version":1,"op":"preflight","operation_directory":p,"plan_sha256":digest,"capture":capture,"peers":[]});
+    assert_eq!(invoke(&preflight).0, 0);
+    let mut wrong_peers = preflight.clone();
+    wrong_peers["peers"] = json!([{}]);
+    assert_eq!(invoke(&wrong_peers).0, 3);
+    let mut changed = capture.clone();
+    changed["source"]["account_id_sha256"] = json!("b".repeat(64));
+    assert_eq!(invoke(&intent(&changed)).0, 3);
+    let mut override_mode = intent(&capture);
+    override_mode["evidence_mode"] = json!("registry-label");
+    assert_eq!(invoke(&override_mode).0, 3);
+    override_mode["evidence_mode"] = Value::Null;
+    assert_eq!(invoke(&override_mode).0, 3);
+    assert_eq!(invoke(&intent(&capture)).0, 0);
+    for i in 0..2 {
+        update_scope(&mut capture, i, |v| {
+            v["computers"][0]["display_name"] = json!("New")
+        });
+    }
+    let verified = invoke(
+        &json!({"schema_version":1,"op":"reconcile","operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture}),
+    );
+    assert_eq!(verified.0, 0);
+    assert_eq!(verified.1["evidence_mode"], "registry-label");
+}
+
+#[test]
+fn legacy_peer_mode_keeps_original_shapes_and_binding() {
+    let (capture, peers) = fixture();
+    let p = path();
+    assert_eq!(prepare(&path(), &capture, &json!([])).0, 3);
+    let (_, receipt) = prepare(&p, &capture, &peers);
+    assert!(receipt.get("evidence_mode").is_none());
+    let plan: Value =
+        serde_json::from_slice(&std::fs::read(format!("{p}/plan.json")).unwrap()).unwrap();
+    assert!(plan.get("evidence_mode").is_none());
+    let status = invoke(
+        &json!({"schema_version":1,"op":"status","operation_directory":p,"plan_sha256":receipt["plan_sha256"]}),
+    );
+    assert_eq!(status.0, 0);
+    assert!(status.1.get("evidence_mode").is_none());
+    let intent = json!({"schema_version":1,"op":"intent","operation_directory":p,"plan_sha256":receipt["plan_sha256"],"environment_id":"env-a","capture":capture,"peers":[]});
+    assert_eq!(invoke(&intent).0, 3);
+    let mut relabel = intent;
+    relabel["evidence_mode"] = json!("registry-label");
+    assert_eq!(invoke(&relabel).0, 3);
+}

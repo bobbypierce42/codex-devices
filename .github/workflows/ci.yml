@@ -47,6 +47,9 @@ jobs:
       - name: Test native app with synthetic providers
         if: matrix.rust == 'stable'
         run: swift test --package-path macos
+      - name: Build native CLI without account access
+        if: matrix.rust == 'stable'
+        run: ./script/build_cli.sh && ./dist/codex-devices-mac --help
       - name: Build native app bundle without launching
         if: matrix.rust == 'stable'
         run: ./script/build_and_run.sh --build-only

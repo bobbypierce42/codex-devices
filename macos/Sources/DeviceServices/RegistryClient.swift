@@ -100,6 +100,19 @@ public struct RegistryCapture: Sendable {
         return records.map { id, row in LogicalDevice(environmentID: id, displayName: row.4, installationIDHash: row.5, kind: row.2, computerType: row.3, occurrences: row.6, installationID: row.1) }.sorted { $0.id < $1.id }
     }
 }
+public struct RegistryRenameReceipt: Sendable, Equatable {
+    public let executorID: String
+    public let customDisplayName: String
+    public init(executorID: String, customDisplayName: String) {
+        self.executorID = executorID; self.customDisplayName = customDisplayName
+    }
+    public func validates(environmentID: String, newName: String) -> Bool {
+        let encoded = Data(executorID.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        return !executorID.isEmpty && executorID == executorID.trimmingCharacters(in: .whitespacesAndNewlines)
+            && !executorID.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+            && customDisplayName == newName && (environmentID == executorID || environmentID == "ccarenv_b64_" + encoded)
+    }
+}
 public struct RegistryClient: Sendable {
     private let transport: HTTPTransport
     public init(transport: @escaping HTTPTransport = { try await NativeHTTP.send($0) }) { self.transport = transport }
@@ -135,9 +148,14 @@ public struct RegistryClient: Sendable {
         _ = try capture.devices()
         return capture
     }
-    public func rename(account: AccountSession, installationID: String, newName: String) async throws {
+    @discardableResult public func rename(account: AccountSession, installationID: String, newName: String, expectedEnvironmentID: String? = nil) async throws -> RegistryRenameReceipt {
         guard !installationID.isEmpty, !newName.isEmpty, newName.utf16.count <= 100, newName == newName.trimmingCharacters(in: .whitespacesAndNewlines), !newName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { throw ServiceError.invalidInput }
         let body = try JSONValue.object(["installation_id": .string(installationID), "custom_display_name": .string(newName)]).data()
-        _ = try await request(account: account, path: "/backend-api/flora/cca/executor", body: body)
+        let response = try JSONValue.parse(await request(account: account, path: "/backend-api/flora/cca/executor", body: body))
+        guard let executor = response["executor_id"].string, !executor.isEmpty, executor == executor.trimmingCharacters(in: .whitespacesAndNewlines), !executor.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+              response["custom_display_name"].string == newName else { throw ServiceError.invalidResponse }
+        let receipt = RegistryRenameReceipt(executorID: executor, customDisplayName: newName)
+        if let expectedEnvironmentID, !receipt.validates(environmentID: expectedEnvironmentID, newName: newName) { throw ServiceError.drift }
+        return receipt
     }
 }

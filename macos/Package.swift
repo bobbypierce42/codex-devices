@@ -7,11 +7,13 @@ let package = Package(
     products: [
         .library(name: "DeviceServices", targets: ["DeviceServices"]),
         .executable(name: "CodexDevices", targets: ["CodexDevicesApp"]),
+        .executable(name: "codex-devices-mac", targets: ["RegistryCLI"]),
         .executable(name: "SSHAskpass", targets: ["SSHAskpass"])
     ],
     targets: [
         .target(name: "DeviceServices"),
         .executableTarget(name: "CodexDevicesApp", dependencies: ["DeviceServices"]),
+        .executableTarget(name: "RegistryCLI", dependencies: ["DeviceServices"]),
         .executableTarget(name: "SSHAskpass"),
         .testTarget(name: "DeviceServicesTests", dependencies: ["DeviceServices"]),
         .testTarget(name: "AppFlowTests", dependencies: ["DeviceServices"])
