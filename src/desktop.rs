@@ -207,7 +207,7 @@ fn string(v: &Value, key: &str) -> Result<String> {
 fn nullable_string(v: &Value, key: &str) -> Result<Option<String>> {
     match v.get(key) {
         Some(Value::String(s)) => Ok(Some(s.clone())),
-        Some(Value::Null) => Ok(None),
+        None | Some(Value::Null) => Ok(None),
         _ => Err(refused()),
     }
 }
@@ -318,6 +318,18 @@ fn plan(c: &Capture, selections: Vec<Selection>, peers: Vec<Peer>, before: &[u8]
         if !selected.insert(&choice.environment_id)
             || validated_name(&choice.new_name)? != choice.new_name
         {
+            return Err(refused());
+        }
+        if aggregate.scopes.values().any(|scope| {
+            scope["computers"]
+                .as_array()
+                .expect("validated")
+                .iter()
+                .any(|row| {
+                    row["environment_id"].as_str() == Some(&choice.environment_id)
+                        && row.get("computer_type").is_none()
+                })
+        }) {
             return Err(refused());
         }
         let (installation, kind, typ, name, status) = aggregate

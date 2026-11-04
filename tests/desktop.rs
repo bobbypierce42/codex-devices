@@ -258,3 +258,74 @@ fn desktop_reports_failed_stdout_as_io_error() {
     child.stdin.take().unwrap().write_all(b"{}").unwrap();
     assert_eq!(child.wait().unwrap().code(), Some(1));
 }
+
+#[test]
+fn missing_cloud_optionals_are_preserved_during_name_repair() {
+    let (mut capture, peers) = fixture();
+    for i in 0..2 {
+        update_scope(&mut capture, i, |v| {
+            v["computers"].as_array_mut().unwrap().push(json!({"environment_id":"cloud-a","kind":"cloud","display_name":"Cloud","unknown_metadata":{"flag":true}}));
+        });
+    }
+    let p = path();
+    let (code, prepared) = prepare(&p, &capture, &peers);
+    assert_eq!(code, 0);
+    let digest = &prepared["plan_sha256"];
+    let intent = json!({"schema_version":1,"op":"intent","operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture,"peers":peers});
+    assert_eq!(invoke(&intent).0, 0);
+    for i in 0..2 {
+        update_scope(&mut capture, i, |v| {
+            v["computers"][0]["display_name"] = json!("New")
+        });
+    }
+    let reconcile = |capture: &Value| json!({"schema_version":1,"op":"reconcile","operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture});
+    let mut changed = capture.clone();
+    update_scope(&mut changed, 0, |v| {
+        v["computers"][1]["status"] = Value::Null
+    });
+    assert_ne!(invoke(&reconcile(&changed)).0, 0);
+    let mut changed = capture.clone();
+    update_scope(&mut changed, 0, |v| {
+        v["computers"][1]["unknown_metadata"]["flag"] = json!(false)
+    });
+    assert_ne!(invoke(&reconcile(&changed)).0, 0);
+    assert_eq!(invoke(&reconcile(&capture)).0, 0);
+}
+
+#[test]
+fn missing_selected_fields_and_wrong_optional_types_refuse() {
+    for field in [
+        "environment_id",
+        "installation_id",
+        "kind",
+        "computer_type",
+        "display_name",
+        "status",
+    ] {
+        let (mut capture, peers) = fixture();
+        for i in 0..2 {
+            update_scope(&mut capture, i, |v| {
+                v["computers"][0].as_object_mut().unwrap().remove(field);
+            });
+        }
+        assert_eq!(prepare(&path(), &capture, &peers).0, 3, "missing {field}");
+    }
+    let (mut capture, peers) = fixture();
+    for i in 0..2 {
+        update_scope(&mut capture, i, |v| {
+            v["computers"][0]["kind"] = json!("personal");
+            v["computers"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("computer_type");
+        });
+    }
+    assert_eq!(prepare(&path(), &capture, &peers).0, 3);
+    for field in ["installation_id", "computer_type", "display_name", "status"] {
+        let (mut capture, peers) = fixture();
+        for i in 0..2 {
+            update_scope(&mut capture, i, |v| v["computers"][0][field] = json!(false));
+        }
+        assert_eq!(prepare(&path(), &capture, &peers).0, 3, "invalid {field}");
+    }
+}
