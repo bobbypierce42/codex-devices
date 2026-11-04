@@ -65,6 +65,14 @@ public struct ServiceProviders: Sendable {
             message = result.failures.isEmpty ? "Discovery and account inventory complete." : "Inventory complete. Some discovery sources were unavailable."
         } catch { fail(error) }
     }
+    public func discoverOnly() async {
+        guard start(.scanning) else { return }; defer { busy = false }
+        inspections = []; devices = []
+        let result = await providers.discover(manualHost)
+        candidates = result.candidates; sourceFailures = result.failures
+        phase = .ready
+        message = result.failures.isEmpty ? "Mac discovery complete." : "Discovery complete. Some sources were unavailable."
+    }
     public func inspect(_ candidate: HostCandidate) async {
         guard start(.inspecting) else { return }; defer { busy = false }
         do {
@@ -88,6 +96,9 @@ public struct ServiceProviders: Sendable {
     }
     public func matchingInspection(for device: LogicalDevice) -> PeerInspection? {
         matchingInspection(for: device, in: devices)
+    }
+    public func matchingInspection(installationIDHash: String) -> PeerInspection? {
+        representativeInspection(for: installationIDHash)
     }
     private func matchingInspection(for device: LogicalDevice, in devices: [LogicalDevice]) -> PeerInspection? {
         guard device.kind == "user", device.computerType == "app_connection", !device.installationID.isEmpty, !device.displayName.isEmpty,

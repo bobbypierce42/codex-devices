@@ -3,72 +3,78 @@ import DeviceServices
 
 @MainActor
 struct ReviewView: View {
-    @ObservedObject var coordinator: RepairCoordinator
+    @ObservedObject var workflow: RegistryWorkflow
     @Binding var isPresented: Bool
     @ViewState private var confirmed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Review selected repairs").font(.title2).fontWeight(.semibold)
-            Text("Only these display names may change. Installation IDs, environment IDs, access, attachments and unselected records must remain unchanged.")
+            Text("Review name change").font(.title2).fontWeight(.semibold)
+            Text("Only the selected Codex label may change. Installation IDs, environment IDs, permissions, attachments and unselected records must remain unchanged.")
                 .foregroundStyle(.secondary)
-            if let receipt = coordinator.receipt {
+            if let receipt = workflow.receipt {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
                         ForEach(receipt.records) { record in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(record.oldName).fontWeight(.semibold)
-                                Label(record.newName, systemImage: "arrow.right")
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Current label").font(.caption).foregroundStyle(.secondary)
+                                Text(record.oldName).font(.headline).textSelection(.enabled)
+                                Text("Proposed label").font(.caption).foregroundStyle(.secondary)
+                                Label(record.newName, systemImage: "arrow.right").font(.headline).textSelection(.enabled)
+                                Text("Registration: \(record.environmentID)")
+                                    .font(.caption.monospaced()).textSelection(.enabled)
                                 Text("Installation fingerprint: \(record.installationIDHash)")
                                     .font(.caption.monospaced()).textSelection(.enabled)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                         }
-                        Text(coordinator.isDemo ? "Simulated operation folder" : "Private backup and operation folder").font(.headline)
-                        Text(receipt.operationDirectory).font(.callout.monospaced()).textSelection(.enabled)
-                        Text(coordinator.isDemo
-                             ? "This synthetic demo simulates the engine receipt. No real backup or service request is created."
-                             : "Keep this folder private. It contains exact registry captures and the reviewed plan.")
+                        Text("Private backup and operation folder").font(.headline)
+                        Text(workflow.operationDirectory?.path ?? receipt.operationDirectory)
+                            .font(.callout.monospaced()).textSelection(.enabled)
+                        Text(workflow.isDemo
+                             ? "This temporary backup contains invented data. The real verification engine is used; no live account request is sent."
+                             : "Keep this folder private. It contains exact registry captures and the reviewed plan. A metadata backup does not promise automatic rollback.")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                Toggle("I reviewed the exact old and new names and the preservation conditions.", isOn: $confirmed)
+                Toggle("I reviewed the exact old and new labels, identity and preservation conditions.", isOn: $confirmed)
                     .toggleStyle(.checkbox)
-                    .disabled(coordinator.phase != .review)
-                if coordinator.phase == .applying {
-                    HStack { ProgressView().controlSize(.small); Text("Repairing once, then verifying fresh readback…") }
-                } else if coordinator.phase != .review {
-                    Text(coordinator.message).foregroundStyle(.secondary)
+                    .disabled(workflow.phase != .review || workflow.isBusy)
+                if workflow.isBusy {
+                    HStack { ProgressView().controlSize(.small); Text("Applying the reviewed change and checking readback…") }
+                } else if workflow.phase != .review {
+                    Text(workflow.message).foregroundStyle(.secondary)
                 }
                 HStack {
-                    Button(coordinator.phase == .applying ? "Please wait" : "Close") { isPresented = false }
-                        .keyboardShortcut(.cancelAction)
-                        .disabled(coordinator.phase == .applying)
+                    Button("Close") { isPresented = false }
+                        .keyboardShortcut(.cancelAction).disabled(workflow.isBusy)
                     Spacer()
-                    Button("Repair Selected") {
+                    Button("Apply Reviewed Change") {
                         let digest = receipt.planSHA256
                         confirmed = false
                         Task {
-                            await coordinator.applyReviewed(planDigest: digest)
-                            if coordinator.phase != .applying { isPresented = false }
+                            await workflow.applyReviewed(planDigest: digest)
+                            if !workflow.isBusy { isPresented = false }
                         }
                     }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!confirmed || coordinator.phase != .review || receipt.records.isEmpty)
+                    .disabled(!confirmed || workflow.phase != .review || workflow.isBusy || receipt.records.count != 1)
                 }
             } else {
-                Label("No anchored review is available. Close and prepare the selected changes again.", systemImage: "exclamationmark.triangle")
+                Label("No anchored review is available. Close and prepare the name change again.", systemImage: "exclamationmark.triangle")
                 Button("Close") { isPresented = false }.keyboardShortcut(.cancelAction)
             }
         }
-        .padding(24).frame(minWidth: 600, idealWidth: 680, minHeight: 440)
-        .interactiveDismissDisabled(coordinator.phase == .applying)
+        .padding(24).frame(minWidth: 600, idealWidth: 680, minHeight: 480)
+        .interactiveDismissDisabled(workflow.isBusy)
+        .onChange(of: workflow.receipt?.planSHA256) { _ in confirmed = false }
     }
 }
 
 struct ReviewView_Previews: PreviewProvider {
     static var previews: some View {
-        ReviewView(coordinator: .demo(), isPresented: .constant(true))
+        ReviewView(workflow: .demo(engineURL: URL(fileURLWithPath: "/tmp/codex-devices-preview-engine")),
+                   isPresented: .constant(true))
     }
 }

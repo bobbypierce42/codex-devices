@@ -2,6 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 import OSLog
+import DeviceServices
 
 // SSH receives the answer only through this helper's dedicated standard output.
 let diagnostics = Logger(subsystem: "org.codex-devices.desktop", category: "SSHAskpass")
@@ -30,6 +31,15 @@ guard
     exit(1)
 }
 diagnostics.notice("invocation-accepted")
+guard let host = environment["CODEX_DEVICES_SSH_HOST"], let user = environment["CODEX_DEVICES_SSH_USER"], let context = try? SSHAuthenticationContext(host: host, user: user), CommandLine.arguments.count == 2 else {
+    diagnostics.error("rejected-authentication-context")
+    exit(1)
+}
+let promptKind = context.kind(for: CommandLine.arguments[1])
+guard promptKind != .unsupported else {
+    diagnostics.error("rejected-prompt-kind")
+    exit(1)
+}
 
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
@@ -37,14 +47,14 @@ application.setActivationPolicy(.accessory)
 application.finishLaunching()
 diagnostics.notice("application-ready")
 let alert = NSAlert()
-alert.messageText = "SSH authentication"
-alert.informativeText = "Enter the password or passphrase requested by SSH. It is sent only to this connection and is never saved."
+alert.messageText = context.title(for: promptKind)
+alert.informativeText = context.explanation(for: promptKind)
 alert.alertStyle = .informational
 alert.addButton(withTitle: "Continue")
 alert.addButton(withTitle: "Cancel")
 let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 340, height: 24))
-field.placeholderString = "Password or passphrase"
-field.setAccessibilityLabel("SSH password or passphrase")
+field.placeholderString = context.title(for: promptKind)
+field.setAccessibilityLabel(context.title(for: promptKind))
 alert.accessoryView = field
 alert.window.initialFirstResponder = field
 var reportedWindowState = false

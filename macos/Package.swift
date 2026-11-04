@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "DeviceServices"),
         .executableTarget(name: "CodexDevicesApp", dependencies: ["DeviceServices"]),
         .executableTarget(name: "RegistryCLI", dependencies: ["DeviceServices"]),
-        .executableTarget(name: "SSHAskpass"),
+        .executableTarget(name: "SSHAskpass", dependencies: ["DeviceServices"]),
         .testTarget(name: "DeviceServicesTests", dependencies: ["DeviceServices"]),
         .testTarget(name: "AppFlowTests", dependencies: ["DeviceServices"])
     ]

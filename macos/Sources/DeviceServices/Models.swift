@@ -110,5 +110,31 @@ public enum JSONValue: Codable, Sendable, Equatable {
     }
     func data() throws -> Data { try JSONEncoder().encode(self) }
 }
+public struct SSHAuthenticationContext: Sendable, Equatable {
+    public enum Kind: String, Sendable { case accountPassword, keyPassphrase, unsupported }
+    public let host: String
+    public let user: String
+    public init(host: String, user: String) throws {
+        guard safeHost(host), safeHost(user), !user.contains(".") else { throw ServiceError.invalidInput }
+        self.host = host; self.user = user
+    }
+    public func kind(for request: String) -> Kind {
+        guard request.utf8.count <= 4096, !request.utf8.contains(0) else { return .unsupported }
+        let text = request.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if text.hasPrefix("enter passphrase for key ") { return .keyPassphrase }
+        if text == "password:" || text.hasSuffix(" password:") { return .accountPassword }
+        return .unsupported
+    }
+    public func title(for kind: Kind) -> String {
+        switch kind { case .accountPassword: "Remote account password"; case .keyPassphrase: "Local SSH key passphrase"; case .unsupported: "Unsupported SSH request" }
+    }
+    public func explanation(for kind: Kind) -> String {
+        switch kind {
+        case .accountPassword: "Connecting to \(host) as \(user). Enter the password for that remote account. It is sent only to this connection and is never saved."
+        case .keyPassphrase: "Connecting to \(host) as \(user). Enter the passphrase that unlocks your local SSH key. It is sent only to this connection and is never saved."
+        case .unsupported: "This SSH request cannot be handled by the password dialog."
+        }
+    }
+}
 func hash(_ string: String) -> String { SHA256.hash(data: Data(string.utf8)).map { String(format: "%02x", $0) }.joined() }
 func isHash(_ value: String) -> Bool { value.count == 64 && value.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }

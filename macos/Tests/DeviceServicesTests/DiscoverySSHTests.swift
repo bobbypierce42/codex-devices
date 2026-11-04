@@ -36,7 +36,7 @@ final class DiscoverySSHTests: XCTestCase {
             XCTAssertEqual(request.arguments, ["-c", SSHService.inspectionCommand])
             return ProcessResult(status: 0, output: Data("\(Data("Studio".utf8).base64EncodedString())\n\(DeviceServices.hash(fixtureInstallation))\n".utf8))
         }, trust: { _ in XCTFail("Local inspection has no SSH prompt"); return false })
-        let peer = try await service.inspect(HostCandidate(host: "localhost", isLocal: true))
+        let peer = try await service.inspect(HostCandidate(host: "localhost", isLocal: true), user: "ignored remote\nuser")
         XCTAssertEqual(peer.computerName, "Studio")
         XCTAssertEqual(peer.hostKeyFingerprint, "SHA256:fixture")
     }
@@ -59,10 +59,10 @@ final class DiscoverySSHTests: XCTestCase {
             XCTFail("SSH must not run"); throw ServiceError.unavailable
         }
         let service = SSHService(helperURL: URL(fileURLWithPath: "/fixture/helper"), trustDirectory: root, runner: runner, trust: { challenge in XCTAssertEqual(challenge.fingerprint, "SHA256:invented"); return false })
-        await assertServiceError(.trustRejected) { _ = try await service.inspect(fixtureHost) }
+        await assertServiceError(.trustRejected) { _ = try await service.inspect(fixtureHost, user: "synthetic-user") }
         try Data(key.utf8).write(to: root.appendingPathComponent("known_hosts"))
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: root.appendingPathComponent("known_hosts").path)
-        await assertServiceError(.changedHostKey) { _ = try await service.inspect(fixtureHost) }
+        await assertServiceError(.changedHostKey) { _ = try await service.inspect(fixtureHost, user: "synthetic-user") }
     }
     func testPrivateTrustRefusesSymlinkAndBroadMode() throws {
         let root = try temporaryDirectory(), target = root.appendingPathComponent("target"), link = root.appendingPathComponent("link")
@@ -100,7 +100,7 @@ final class DiscoverySSHTests: XCTestCase {
             if request.executable.lastPathComponent == "ssh-keygen" { return .init(status: 0, output: Data("256 SHA256:fixture studio.example (ED25519)\n".utf8)) }
             throw ServiceError.unavailable
         }, trust: { _ in await calls.record("trust"); return false })
-        await assertServiceError(.trustRejected) { _ = try await service.inspect(fixtureHost) }
+        await assertServiceError(.trustRejected) { _ = try await service.inspect(fixtureHost, user: "synthetic-user") }
         let stages = await calls.values()
         XCTAssertEqual(stages, ["ssh-keyscan", "ssh-keygen", "trust"])
         let knownHosts = directory.appendingPathComponent("known_hosts")
@@ -122,15 +122,35 @@ final class DiscoverySSHTests: XCTestCase {
             guard parsed.status == 0 else { throw ServiceError.refused }
             XCTAssertTrue(request.arguments.contains("-oStrictHostKeyChecking=yes"))
             XCTAssertTrue(request.arguments.contains("-oGlobalKnownHostsFile=/dev/null"))
+            XCTAssertEqual(request.environment["CODEX_DEVICES_SSH_HOST"], "studio.example")
+            XCTAssertEqual(request.environment["CODEX_DEVICES_SSH_USER"], "synthetic-user")
             return .init(status: 0, output: Data("\(Data("Studio".utf8).base64EncodedString())\n\(DeviceServices.hash(fixtureInstallation))\n".utf8))
         }, trust: { _ in true })
-        let peer = try await service.inspect(fixtureHost)
+        let peer = try await service.inspect(fixtureHost, user: "synthetic-user")
         XCTAssertEqual(peer.computerName, "Studio")
     }
     func testKnownHostsConfigurationRefusesQuotesBackslashesAndControls() {
         for path in ["/private/tmp/synthetic\"path/known_hosts", "/private/tmp/synthetic\\path/known_hosts", "/private/tmp/synthetic\npath/known_hosts"] {
             XCTAssertThrowsError(try SSHService.knownHostsOption(URL(fileURLWithPath: path))) { XCTAssertEqual($0 as? ServiceError, .refused) }
         }
+    }
+    func testPromptContextNamesTargetAndDistinguishesPasswordFromKeyPassphrase() throws {
+        let context = try SSHAuthenticationContext(host: "studio.example", user: "synthetic-user")
+        XCTAssertEqual(context.kind(for: "synthetic-user@studio.example's password:"), .accountPassword)
+        XCTAssertEqual(context.kind(for: "Password:"), .accountPassword)
+        XCTAssertEqual(context.kind(for: "(synthetic-user@studio.example) Password:"), .accountPassword)
+        XCTAssertEqual(context.kind(for: "Enter passphrase for key '/invented/local-key':"), .keyPassphrase)
+        XCTAssertEqual(context.kind(for: "Are you sure you want to continue connecting?"), .unsupported)
+        XCTAssertEqual(context.title(for: .accountPassword), "Remote account password")
+        XCTAssertEqual(context.title(for: .keyPassphrase), "Local SSH key passphrase")
+        XCTAssertTrue(context.explanation(for: .accountPassword).contains("studio.example as synthetic-user"))
+        XCTAssertTrue(context.explanation(for: .keyPassphrase).contains("local SSH key"))
+        for user in ["", "-lroot", "invented\nuser"] { XCTAssertThrowsError(try SSHAuthenticationContext(host: "studio.example", user: user)) }
+        XCTAssertThrowsError(try SSHAuthenticationContext(host: "host;command", user: "synthetic-user"))
+    }
+    func testRemoteInspectionRequiresExplicitUserBeforeAnyProcessOrTrust() async {
+        let service = SSHService(helperURL: URL(fileURLWithPath: "/fixture/helper"), trustDirectory: URL(fileURLWithPath: "/fixture/trust"), runner: { _ in XCTFail("No process without explicit SSH account"); throw ServiceError.unavailable }, trust: { _ in XCTFail(); return false })
+        await assertServiceError(.invalidInput) { _ = try await service.inspect(fixtureHost) }
     }
 }
 

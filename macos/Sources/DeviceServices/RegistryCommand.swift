@@ -71,8 +71,11 @@ public struct RegistryCommandProviders: Sendable {
         self.account = account; self.capture = capture; self.rename = rename; self.engine = engine
     }
     public static func native(command: RegistryCommand, executableURL: URL) -> RegistryCommandProviders {
-        let registry = RegistryClient(), engine = EngineClient(executable: command.engineURL ?? executableURL.deletingLastPathComponent().appendingPathComponent("codex-devices"))
-        return RegistryCommandProviders(account: { try await AppServerSession(executable: command.appServerURL ?? AppServerSession.installedExecutable()).account() }, capture: { try await registry.capture(account: $0) }, rename: { try await registry.rename(account: $0, installationID: $1, newName: $2, expectedEnvironmentID: $3) }, engine: { try await engine.send($0) })
+        native(engineURL: command.engineURL ?? executableURL.deletingLastPathComponent().appendingPathComponent("codex-devices"), appServerURL: command.appServerURL)
+    }
+    public static func native(engineURL: URL, appServerURL: URL? = nil) -> RegistryCommandProviders {
+        let registry = RegistryClient(), engine = EngineClient(executable: engineURL)
+        return RegistryCommandProviders(account: { try await AppServerSession(executable: appServerURL ?? AppServerSession.installedExecutable()).account() }, capture: { try await registry.capture(account: $0) }, rename: { try await registry.rename(account: $0, installationID: $1, newName: $2, expectedEnvironmentID: $3) }, engine: { try await engine.send($0) })
     }
 }
 public struct RegistryCommandResult: Sendable {
@@ -85,6 +88,10 @@ public struct RegistryCommandResult: Sendable {
 public struct RegistryCommandRunner: Sendable {
     private let providers: RegistryCommandProviders
     public init(providers: RegistryCommandProviders) { self.providers = providers }
+    public func review(operationDirectory: URL, planSHA256: String) async throws -> OperationReceipt {
+        let command = try RegistryCommand.parse(["verify", "--operation", operationDirectory.path, "--expected-plan-sha256", planSHA256])
+        return try validate(await providers.engine(request(op: "status", directory: operationDirectory.appendingPathComponent("engine", isDirectory: true), digest: planSHA256)), command: command)
+    }
     public func run(arguments: [String]) async -> RegistryCommandResult {
         do { return await run(try RegistryCommand.parse(arguments)) }
         catch { return Self.failure(.invalidInput, uncertain: false) }
@@ -191,7 +198,7 @@ public struct RegistryCommandRunner: Sendable {
     }
 }
 
-private enum RegistryResponseEvidence {
+enum RegistryResponseEvidence {
     enum Outcome: String { case unknown, accepted, rejected }
     static let filename = "registry-response.json"
     static func createWrapper(_ directory: URL) throws {
@@ -246,7 +253,7 @@ private enum RegistryResponseEvidence {
         guard value["plan_sha256"].string == digest, value["environment_id"].string == environmentID, let raw = value["outcome"].string, let outcome = Outcome(rawValue: raw) else { throw ServiceError.refused }
         return outcome
     }
-    private static func validate(_ fd: Int32) throws {
+    static func validate(_ fd: Int32) throws {
         var info = stat()
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_uid == getuid(), info.st_nlink == 1, info.st_mode & 0o077 == 0, info.st_size <= 4096 else { throw ServiceError.refused }
     }

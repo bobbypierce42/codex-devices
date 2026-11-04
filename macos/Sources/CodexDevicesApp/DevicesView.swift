@@ -1,28 +1,30 @@
 import SwiftUI
 import DeviceServices
 
-// A type alias selects the macOS 13 property wrapper on SDKs that also export a State macro.
+// Select the macOS 13 property wrapper on SDKs that also export a State macro.
 typealias ViewState<Value> = SwiftUI.State<Value>
 
 @MainActor
 struct DevicesView: View {
-    @ObservedObject var coordinator: RepairCoordinator
-    var isDemo = false
-    @ViewState private var selected = Set<String>()
-    @ViewState private var proposedNames: [String: String] = [:]
+    @ObservedObject var workflow: RegistryWorkflow
+    @ObservedObject var network: RepairCoordinator
+    @ViewState private var selectedID: String?
+    @ViewState private var proposedName = ""
+    @ViewState private var activeTab = 0
     @ViewState private var showsReview = false
 
-    private var busy: Bool {
-        [.scanning, .inspecting, .preparing, .applying].contains(coordinator.phase)
+    private var networkBusy: Bool { [.scanning, .inspecting].contains(network.phase) }
+    private var locked: Bool { workflow.isBusy || networkBusy || workflow.phase == .uncertain }
+    private var selectedRecord: RegistryComputer? { workflow.records.first { $0.id == selectedID } }
+    private var canPrepare: Bool {
+        guard let record = selectedRecord, record.isRenameable, !locked else { return false }
+        return proposedName != record.displayName && validName(proposedName)
     }
-
-    private var selectedChanges: [ReviewSelection] {
-        coordinator.devices.compactMap { device in
-            guard selected.contains(device.id), let inspection = coordinator.matchingInspection(for: device) else { return nil }
-            let name = (proposedNames[device.id] ?? inspection.computerName).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard validName(name), name != device.displayName else { return nil }
-            return ReviewSelection(environmentID: device.id, newName: name)
-        }
+    private var selection: Binding<String?> {
+        Binding(get: { selectedID }, set: { value in
+            selectedID = value
+            proposedName = workflow.records.first { $0.id == value }?.displayName ?? ""
+        })
     }
 
     var body: some View {
@@ -30,224 +32,181 @@ struct DevicesView: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Codex Devices").font(.title).fontWeight(.semibold)
-                    Text("Compare Mac system names with existing Codex registrations.")
+                    Text("Review and update the labels of existing Codex computers.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { scan() } label: { Label("Scan", systemImage: "arrow.clockwise") }
+                Button { refresh() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .keyboardShortcut("r", modifiers: .command)
-                    .disabled(busy || coordinator.phase == .uncertain)
-                    .help("Find Macs and read the complete Codex computer list")
+                    .disabled(locked)
+                    .help("Read the complete account computer list without SSH")
             }
-            if isDemo {
-                Label("Synthetic demo: invented computers and simulated engine receipts", systemImage: "testtube.2")
+            if workflow.isDemo {
+                Label("Synthetic demo: invented account data, temporary backups and the real verification engine", systemImage: "testtube.2")
                     .font(.callout).padding(8).frame(maxWidth: .infinity, alignment: .leading)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
-            HStack {
-                TextField("Mac hostname or address", text: $coordinator.manualHost)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Mac hostname or address")
-                    .onSubmit { if !busy && coordinator.phase != .uncertain { scan() } }
-                TextField("SSH user (optional)", text: $coordinator.sshUser)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("SSH user, optional")
-                    .frame(maxWidth: 200)
-                Button("Add & Scan") { scan() }
-                    .disabled(busy || coordinator.phase == .uncertain || coordinator.manualHost.isEmpty)
-            }
-            .disabled(busy || coordinator.phase == .uncertain)
             HStack(alignment: .top, spacing: 8) {
-                if busy { ProgressView().controlSize(.small).accessibilityLabel(statusTitle) }
+                if workflow.isBusy { ProgressView().controlSize(.small).accessibilityLabel(statusTitle) }
                 else { Image(systemName: statusIcon).accessibilityHidden(true) }
                 VStack(alignment: .leading, spacing: 4) {
                     Text(statusTitle).fontWeight(.semibold)
-                    Text(coordinator.message.isEmpty ? "Scan, inspect a Mac, then select its exact name change." : coordinator.message)
-                        .foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(workflow.message).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 Spacer()
-                if coordinator.phase == .uncertain {
-                    Button("Check Readback") { Task { await coordinator.reconcilePending() } }
-                        .help("Read the current registry without repeating a repair request")
+                if workflow.phase == .uncertain {
+                    Button("Check Readback") { Task { await workflow.verifyPending() } }
+                        .disabled(workflow.isBusy)
+                        .help("Read back this operation without repeating a rename request")
                 }
             }
-            ForEach(Array(coordinator.sourceFailures.enumerated()), id: \.offset) { _, failure in
-                Label("\(failure.source): \(failure.error.localizedDescription)", systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(.secondary)
-            }
-            Divider()
-            if coordinator.candidates.isEmpty && coordinator.devices.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "desktopcomputer").font(.largeTitle).accessibilityHidden(true)
-                    Text("No computers loaded").font(.headline)
-                    Text("Choose Scan to discover Macs. Add a hostname if discovery cannot find one.")
-                        .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            TabView(selection: $activeTab) {
+                accountContent
+                    .tabItem { Label("Codex computers", systemImage: "desktopcomputer") }.tag(0)
+                NetworkInspectionView(coordinator: network, workflow: workflow) { record, name in
+                    selectedID = record.id
+                    proposedName = name
+                    activeTab = 0
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Discovered Macs").font(.headline)
-                        ForEach(coordinator.candidates) { candidate in
-                            HStack {
-                                Image(systemName: candidate.isLocal ? "desktopcomputer" : "network")
-                                    .accessibilityHidden(true)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(candidate.name).fontWeight(.medium)
-                                    Text("\(candidate.host) · \(candidate.source)").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if let inspection = coordinator.inspections.first(where: { $0.candidate.id == candidate.id }) {
-                                    VStack(alignment: .trailing, spacing: 2) {
-                                        Label(inspection.computerName, systemImage: "checkmark.circle")
-                                        Text(inspection.hostKeyFingerprint ?? "Local inspection")
-                                            .font(.caption.monospaced()).foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-                                    .help("Reachable and inspected; system name and SSH host key fingerprint")
-                                } else { Text("Not inspected").foregroundStyle(.secondary) }
-                                Button("Inspect") { Task { await coordinator.inspect(candidate) } }
-                                    .accessibilityLabel("Inspect \(candidate.name)")
-                                    .disabled(busy || coordinator.phase == .uncertain)
-                            }
-                            .padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        Divider().padding(.vertical, 4)
-                        Text("Compare names").font(.headline)
-                        Text("Only a uniquely matched, inspected installation can be selected. Repeated registrations across Dots appear once.")
-                            .font(.callout).foregroundStyle(.secondary)
-                        if coordinator.devices.isEmpty {
-                            Text("No complete Codex computer list is available. Check the scan status above.")
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(coordinator.devices) { device in
-                            deviceRow(device)
-                        }
-                    }
-                    .padding(.trailing, 8)
-                }
-            }
-            Divider()
-            HStack {
-                Text("Installation IDs and unselected records are preserved.")
-                    .font(.callout).foregroundStyle(.secondary)
-                Spacer()
-                Button("Review \(selectedChanges.count) Change\(selectedChanges.count == 1 ? "" : "s")") {
-                    let changes = selectedChanges
-                    Task { await coordinator.prepare(changes) }
-                }
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(busy || coordinator.phase == .uncertain || selectedChanges.isEmpty || selectedChanges.count != selected.count)
+                .disabled(workflow.isBusy || workflow.phase == .uncertain || workflow.phase == .review)
+                .tabItem { Label("Find Macs", systemImage: "network") }.tag(1)
             }
         }
         .padding(20)
-        .onChange(of: coordinator.inspections) { _ in
-            for device in coordinator.devices {
-                if let inspection = coordinator.matchingInspection(for: device), proposedNames[device.id] == nil {
-                    proposedNames[device.id] = inspection.computerName
-                }
-            }
-        }
-        .onChange(of: coordinator.phase) { phase in
+        .task { if workflow.phase == .idle { await workflow.refresh() } }
+        .onChange(of: workflow.phase) { phase in
             if phase == .review { showsReview = true }
-            if phase == .verified { selected.removeAll() }
+            if phase == .verified { selectedID = nil; proposedName = "" }
+        }
+        .onChange(of: workflow.records.map(\.id)) { ids in
+            if let selectedID, !ids.contains(selectedID) { self.selectedID = nil; proposedName = "" }
         }
         .sheet(isPresented: $showsReview) {
-            ReviewView(coordinator: coordinator, isPresented: $showsReview)
+            ReviewView(workflow: workflow, isPresented: $showsReview)
         }
-    }
-
-    private func scan() {
-        selected.removeAll()
-        proposedNames.removeAll()
-        Task { await coordinator.scan() }
-    }
-
-    private func validName(_ name: String) -> Bool {
-        !name.isEmpty && name.utf16.count <= 100
-            && name.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
     @ViewBuilder
-    private func deviceRow(_ device: LogicalDevice) -> some View {
-        let inspection = coordinator.matchingInspection(for: device)
-        let hasInspectedMatch = coordinator.inspections.contains { $0.installationIDHash == device.installationIDHash }
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 16) {
-                Toggle(isOn: Binding(
-                    get: { selected.contains(device.id) },
-                    set: { if $0 { selected.insert(device.id) } else { selected.remove(device.id) } }
-                )) { Text("Select").hidden() }
-                .labelsHidden().toggleStyle(.checkbox)
-                .accessibilityLabel("Select name change for \(device.displayName)")
-                .disabled(inspection == nil || busy || coordinator.phase == .uncertain)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Mac system name").font(.caption).foregroundStyle(.secondary)
-                    Text(inspection?.computerName ?? "Unknown: inspect a matching Mac")
-                    Text(inspection?.candidate.host ?? "No unique inspected match").font(.caption).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Codex name").font(.caption).foregroundStyle(.secondary)
-                    Text(device.displayName).textSelection(.enabled)
-                    Text("Fingerprint \(device.installationIDHash.prefix(12))…")
-                        .font(.caption.monospaced()).foregroundStyle(.secondary)
-                        .help(device.installationIDHash)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Proposed name").font(.caption).foregroundStyle(.secondary)
-                    TextField("Inspect to propose a name", text: Binding(
-                        get: { proposedNames[device.id] ?? inspection?.computerName ?? "" },
-                        set: { proposedNames[device.id] = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Proposed Codex name for \(device.displayName)")
-                    .disabled(inspection == nil || busy || coordinator.phase == .uncertain)
-                    if inspection != nil {
-                        let name = (proposedNames[device.id] ?? inspection?.computerName ?? "")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !validName(name) {
-                            Label("Name is empty, too long, or contains unsupported characters.", systemImage: "exclamationmark.triangle")
-                                .font(.caption)
-                        } else if name == device.displayName {
-                            Text("Already matches").font(.caption).foregroundStyle(.secondary)
+    private var accountContent: some View {
+        if workflow.records.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "desktopcomputer").font(.largeTitle).accessibilityHidden(true)
+                Text(workflow.isBusy ? "Loading Codex computers" : "No account computers loaded").font(.headline)
+                Text("This list includes online and offline account registrations. Network inspection is optional.")
+                    .foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            HSplitView {
+                List(selection: selection) {
+                    ForEach(workflow.records) { record in
+                        HStack(spacing: 10) {
+                            Image(systemName: record.kind == "openai_cloud" ? "cloud" : "desktopcomputer")
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(record.displayName).lineLimit(1)
+                                Text("\(statusText(record.status))\(record.isRenameable ? "" : " · Read only")")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
+                        .tag(record.id)
                     }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if inspection == nil && hasInspectedMatch {
-                Label("Blocked: inspection does not identify one unambiguous registration and Mac.", systemImage: "exclamationmark.triangle")
-                    .font(.callout)
-            }
-            DisclosureGroup("\(device.occurrences.count) Dot occurrence\(device.occurrences.count == 1 ? "" : "s")") {
-                ForEach(Array(device.occurrences.enumerated()), id: \.offset) { _, occurrence in
-                    Text("Dot \(occurrence.dotID) · Thread \(occurrence.threadID)")
-                        .font(.caption.monospaced()).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("Each occurrence keeps its own access and attachment fields.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .listStyle(.sidebar)
+                .accessibilityLabel("Codex account computers")
+                .frame(minWidth: 240, idealWidth: 280, maxWidth: 340)
+                .disabled(locked)
+                ScrollView {
+                    if let record = selectedRecord {
+                        recordDetail(record)
+                    } else {
+                        VStack(spacing: 12) {
+                            Text("Select a registration").font(.headline)
+                            Text("Review its identity and current label before proposing one name change. Nothing is selected automatically.")
+                                .foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
+                        .padding(32).frame(maxWidth: .infinity)
+                    }
+                }
+                .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(.top, 8)
         }
-        .padding(12).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
+    private func recordDetail(_ record: RegistryComputer) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(record.displayName).font(.title2).fontWeight(.semibold).textSelection(.enabled)
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                GridRow { Text("Status").foregroundStyle(.secondary); Text(statusText(record.status)) }
+                GridRow { Text("Registration").foregroundStyle(.secondary); Text(record.environmentID).textSelection(.enabled) }
+                GridRow { Text("Installation fingerprint").foregroundStyle(.secondary); Text(record.installationIDHash).font(.caption.monospaced()).textSelection(.enabled) }
+                GridRow { Text("Dot occurrences").foregroundStyle(.secondary); Text("\(record.scopeCount)") }
+            }
+            Divider()
+            if record.isRenameable {
+                Text("Proposed Codex label").font(.headline)
+                TextField("Proposed Codex label", text: $proposedName)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Proposed Codex label for \(record.displayName)")
+                    .disabled(locked)
+                if !validName(proposedName) {
+                    Label("Use a nonempty label without leading or trailing spaces, within the supported length.", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                } else if proposedName == record.displayName {
+                    Text("No label change proposed.").font(.callout).foregroundStyle(.secondary)
+                }
+                Text("This changes the selected account label. SSH and the other Mac's password are not required. The system name is not changed.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Prepare Backup & Review") {
+                    let id = record.environmentID, name = proposedName
+                    Task { await workflow.prepare(environmentID: id, newName: name) }
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!canPrepare)
+                Text("Installation IDs, environment IDs, permissions, attachments and unselected records must remain unchanged.")
+                    .font(.callout).foregroundStyle(.secondary)
+            } else {
+                Label("This registration is read only.", systemImage: "lock")
+                Text("Cloud, unsupported and ambiguous registrations cannot be renamed.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func refresh() {
+        selectedID = nil
+        proposedName = ""
+        Task { await workflow.refresh() }
+    }
+    private func validName(_ name: String) -> Bool {
+        !name.isEmpty && name == name.trimmingCharacters(in: .whitespacesAndNewlines) && name.utf16.count <= 100
+            && name.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
+    }
+    private func statusText(_ status: String?) -> String {
+        switch status {
+        case "connected", "online": return "Online"
+        case "disconnected", "offline": return "Offline"
+        default: return "Status unknown"
+        }
+    }
     private var statusTitle: String {
-        switch coordinator.phase {
-        case .idle: return "Ready to scan"
-        case .scanning: return "Scanning"
-        case .inspecting: return "Inspecting Mac"
-        case .ready: return "Ready to compare"
+        switch workflow.phase {
+        case .idle: return "Ready to load account computers"
+        case .scanning: return "Loading account computers"
+        case .inspecting: return "Reading account state"
+        case .ready: return "Account computers loaded"
         case .preparing: return "Preparing private backup and review"
-        case .review: return "Review prepared"
-        case .applying: return "Repairing and checking fresh readback"
-        case .verified: return isDemo ? "Verified in synthetic demo" : "Verified"
-        case .uncertain: return "Outcome unknown: readback required"
+        case .review: return "Name change ready for review"
+        case .applying: return "Checking operation and fresh readback"
+        case .verified: return workflow.isDemo ? "Verified with invented data" : "Verified"
+        case .uncertain: return "Outcome uncertain: readback only"
         case .failed: return "Action blocked or incomplete"
         }
     }
-
     private var statusIcon: String {
-        switch coordinator.phase {
+        switch workflow.phase {
         case .verified: return "checkmark.shield"
         case .failed, .uncertain: return "exclamationmark.triangle"
         default: return "info.circle"
@@ -257,6 +216,7 @@ struct DevicesView: View {
 
 struct DevicesView_Previews: PreviewProvider {
     static var previews: some View {
-        DevicesView(coordinator: .demo(), isDemo: true).frame(width: 1040, height: 720)
+        DevicesView(workflow: .demo(engineURL: URL(fileURLWithPath: "/tmp/codex-devices-preview-engine")), network: .demo())
+            .frame(width: 1040, height: 720)
     }
 }

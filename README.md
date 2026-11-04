@@ -86,32 +86,45 @@ open 'dist/Codex Devices.app'
 The bundle embeds the native interface, Rust verification engine and SSH
 authentication helper. Normal use requires no pasted scripts or CLI installation
 on each Mac. Run `./script/build_and_run.sh` to rebuild and launch; add `--demo`
-for invented computers, injected services and simulated engine receipts. The
-demo uses an explicit temporary path but creates no real backup or service write.
+for invented computers and injected account services with the real Rust engine.
+The demo creates guarded temporary backups and performs no live service writes.
 `--verify` checks process startup; it does not establish repair acceptance.
 Close the staged app before `--build-only`; the script refuses to overwrite a
 running executable. Normal rebuild-and-launch stops only this staged app.
 
-1. Choose **Scan**, or add a Mac hostname and choose **Add & Scan**. Discovery
-   uses Bonjour and an existing Tailscale installation when available.
-2. Choose **Inspect** for a Mac. Existing SSH access is required. The app shows
-   an unknown host's public fingerprint for explicit trust and uses a native
-   secure password prompt when SSH requests authentication. Changed keys refuse.
-3. Compare the inspected system name with the Codex name. Only a unique
-   installation fingerprint match can be selected. Edit the proposed name if
-   needed; repeated occurrences across Dots remain one selection.
-4. Choose **Review**, check the exact old/new names and private backup folder,
-   confirm the preservation conditions, then choose **Repair Selected**.
-5. **Verified** requires a fresh complete readback with the selected names changed
-   and identities, access, attachments and unselected records preserved. An
-   uncertain result offers **Check Readback** without repeating the write.
+1. Open the app. **Codex computers** loads the signed-in account's complete list,
+   including offline entries. Nothing is selected automatically. Known account
+   labels can be edited without SSH or the other Mac's password.
+2. Select one personal registration and edit its **Proposed Codex label**.
+   Cloud, unsupported and ambiguous records remain read only. An unchanged label
+   proposes no action.
+3. Choose **Prepare Backup & Review**. Check the exact current/proposed labels,
+   registration, installation fingerprint and private backup location.
+4. Confirm the review, then choose **Apply Reviewed Change**. The app uses the
+   same guarded workflow as the native CLI. It sends no change before approval.
+5. **Verified** requires the matching response identity/name and fresh complete
+   readback preserving identities, permissions, attachments and unselected
+   records. An uncertain result offers **Check Readback** without repeating the
+   write. Saved reviews and pending operations can be recovered after restart.
+
+To compare with a Mac's system name, use the optional **Find Macs** tab and choose
+**Scan Network**. Discovery uses Bonjour, an existing Tailscale installation and
+an optional hostname. **Inspect** confirms the exact target and account first.
+Remote inspection uses existing SSH access and explicit host-key trust; changed
+keys refuse. Its secure prompt distinguishes that remote account's password
+from a local SSH key passphrase. Local inspection uses the current Mac account.
+An unambiguous match can copy the literal system name into the account editor;
+the same backup and name review still follow. No network inspection starts
+automatically, and custom labels are not rewritten automatically.
 
 Private backups and operation journals are retained under
-`~/Library/Application Support/Codex Devices/Operations`. They contain exact
-registry captures and reviewed plans. Keep them private and retain them if an
-operation stops. Passwords are neither saved nor written to artifacts. Existing
-Codex sign-in is used without login, logout or forced refresh. No installation
-ID is rotated, and no stale registration is deleted.
+`~/Library/Application Support/Codex Devices/AccountOperations`. Each review
+contains a wrapper folder with `engine/before.json`, `engine/plan.json`, a journal
+and response evidence. The private `last-review.json` pointer supports recovery;
+unknown or invalid saved state blocks new preparation. Keep the complete folder
+if an operation stops. SSH trust remains under the separate `Operations/ssh`
+folder. Passwords are never saved. Existing Codex sign-in is used without login,
+logout or forced refresh. No installation ID is rotated or stale entry deleted.
 
 The internal API is unsupported and can change. A successful build, fixture run
 or app launch does not establish live SSH, account or repair compatibility. Native
