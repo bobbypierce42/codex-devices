@@ -36,6 +36,15 @@ final class RegistryCommandTests: XCTestCase {
         XCTAssertFalse(result.output.contains(fixtureInstallation))
         let events = await fixture.events(); XCTAssertEqual(events, ["account", "capture"])
     }
+    func testAbsoluteOperationPathDoesNotChangeWhenDirectoryBeginsToExist() throws {
+        let root = try temporaryDirectory(), directory = root.appendingPathComponent("lexical-operation")
+        let before = try RegistryCommand.parse(["rename", "--id", "env-studio", "--name", "Studio", "--out", directory.path])
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let after = try RegistryCommand.parse(["apply", "--operation", directory.path, "--approve-plan-sha256", String(repeating: "a", count: 64)])
+        XCTAssertEqual(before.operationDirectory?.path, directory.path)
+        XCTAssertEqual(after.operationDirectory?.path, directory.path)
+        XCTAssertEqual(before.operationDirectory?.path, after.operationDirectory?.path)
+    }
     func testRealEnginePrepareBacksUpExactCaptureAndApplyRequiresDurableIntent() async throws {
         let (fixture, directory) = try setupFixture(), digest = try await prepare(fixture, directory)
         let before = try JSONValue.parse(Data(contentsOf: directory.appendingPathComponent("engine/before.json")))

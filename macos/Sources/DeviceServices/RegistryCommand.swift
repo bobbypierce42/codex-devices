@@ -55,7 +55,10 @@ public struct RegistryCommand: Sendable, Equatable {
     }
     private static func absoluteURL(_ path: String) throws -> URL {
         guard path.hasPrefix("/"), !path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains), !path.split(separator: "/").contains("..") else { throw ServiceError.invalidInput }
-        return URL(fileURLWithPath: path).standardizedFileURL
+        // Foundation standardization can shorten existing /private paths through
+        // symlink aliases. Keep identity stable and let no-follow storage checks run.
+        let parts = path.split(separator: "/").filter { $0 != "." }
+        return URL(fileURLWithPath: "/" + parts.joined(separator: "/"))
     }
 }
 
