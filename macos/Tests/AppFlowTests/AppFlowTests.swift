@@ -57,7 +57,7 @@ final class AppFlowTests: XCTestCase {
 
         await coordinator.scan()
         XCTAssertEqual(coordinator.phase, .ready)
-        XCTAssertEqual(coordinator.devices.count, 2)
+        XCTAssertEqual(coordinator.devices.count, 3)
         XCTAssertEqual(coordinator.devices.first { $0.id == "invented-selected" }?.occurrences.count, 2)
         await coordinator.inspect(NativeBridgeFixture.candidate)
         await coordinator.prepare([ReviewSelection(environmentID: "invented-selected", newName: "Invented Studio")])
@@ -84,6 +84,7 @@ final class AppFlowTests: XCTestCase {
         XCTAssertEqual(afterDevices.map(\.installationIDHash), beforeDevices.map(\.installationIDHash))
         XCTAssertEqual(afterDevices.map(\.environmentID), beforeDevices.map(\.environmentID))
         XCTAssertEqual(afterDevices.first { $0.id == "invented-unselected" }, beforeDevices.first { $0.id == "invented-unselected" })
+        XCTAssertEqual(afterDevices.first { $0.id == "invented-cloud" }, beforeDevices.first { $0.id == "invented-cloud" })
         let occurrences = try XCTUnwrap(afterDevices.first { $0.id == "invented-selected" }).occurrences
         XCTAssertTrue(occurrences.allSatisfy { $0.record["display_name"].string == "Invented Studio" })
         XCTAssertEqual(occurrences.map { $0.record["can_connect"] }, [.bool(true), .bool(false)])
@@ -218,7 +219,12 @@ private actor NativeBridgeFixture {
                 "kind": .string("user"), "computer_type": .string("app_connection"),
                 "display_name": .string("Invented Other Mac"), "status": .string("offline"), "can_connect": .bool(false)
             ])
-            let response: JSONValue = .object(["thread_id": .string(thread), "computers": .array([selected, unselected]), "next_cursor": .null])
+            let cloud: JSONValue = .object([
+                "environment_id": .string("invented-cloud"), "kind": .string("openai_cloud"),
+                "display_name": .string("Invented Cloud"), "can_connect": .bool(false),
+                "unknown_metadata": .object(["preserved": .bool(true)])
+            ])
+            let response: JSONValue = .object(["thread_id": .string(thread), "computers": .array([selected, unselected, cloud]), "next_cursor": .null])
             return RegistryCapture.Scope(dotID: dot, threadID: thread, computersResponse: String(decoding: try response.data(), as: UTF8.self))
         }
         let root: JSONValue = .object(["items": .array(scopes.map { .object(["id": .string($0.dotID), "active_root_thread_id": .string($0.threadID), "display_name": .string("Invented Dot")]) }), "cursor": .null])
