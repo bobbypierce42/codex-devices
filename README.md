@@ -27,6 +27,8 @@ on each Mac. Run `./script/build_and_run.sh` to rebuild and launch; add `--demo`
 for invented computers, injected services and simulated engine receipts. The
 demo uses an explicit temporary path but creates no real backup or service write.
 `--verify` checks process startup; it does not establish repair acceptance.
+Close the staged app before `--build-only`; the script refuses to overwrite a
+running executable. Normal rebuild-and-launch stops only this staged app.
 
 1. Choose **Scan**, or add a Mac hostname and choose **Add & Scan**. Discovery
    uses Bonjour and an existing Tailscale installation when available.

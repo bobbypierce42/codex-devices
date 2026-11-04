@@ -24,14 +24,18 @@ public struct SSHService: Sendable {
             guard FileManager.default.createFile(atPath: knownHosts.path, contents: Data(), attributes: [.posixPermissions: 0o600]) else { throw ServiceError.refused }
         }
         try Self.privateFile(knownHosts)
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh-keyscan"), .keyscanBegin)
         let scan = try await runner(ProcessRequest(executable: URL(fileURLWithPath: "/usr/bin/ssh-keyscan"), arguments: ["-T", "5", "-t", "ed25519", "--", candidate.host], timeout: 7, outputLimit: 65536))
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh-keyscan"), .keyscanReturned, status: scan.status)
         guard scan.status == 0, let text = String(data: scan.output, encoding: .utf8) else { throw ServiceError.unavailable }
         let keys = text.split(separator: "\n").filter { !$0.hasPrefix("#") }
         guard keys.count == 1 else { throw ServiceError.refused }
         let fields = keys[0].split(whereSeparator: { $0 == " " || $0 == "\t" })
         guard fields.count == 3, fields[0] == Substring(candidate.host), fields[1] == "ssh-ed25519", Data(base64Encoded: String(fields[2])) != nil else { throw ServiceError.invalidResponse }
         let key = String(keys[0]) + "\n"
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh-keygen"), .fingerprintBegin)
         let fingerprint = try await runner(ProcessRequest(executable: URL(fileURLWithPath: "/usr/bin/ssh-keygen"), arguments: ["-lf", "-"], input: Data(key.utf8), outputLimit: 4096))
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh-keygen"), .fingerprintReturned, status: fingerprint.status)
         guard fingerprint.status == 0, let description = String(data: fingerprint.output, encoding: .utf8), let digest = description.split(separator: " ").first(where: { $0.hasPrefix("SHA256:") }) else { throw ServiceError.invalidResponse }
         let pinned = try String(contentsOf: knownHosts, encoding: .utf8).split(separator: "\n").filter { $0.split(separator: " ").first == Substring(candidate.host) }
         if !pinned.isEmpty {
@@ -47,7 +51,9 @@ public struct SSHService: Sendable {
         if !user.isEmpty { arguments += ["-l", user] }
         arguments += ["--", candidate.host, Self.inspectionCommand]
         let environment = ["SSH_ASKPASS": helperURL.path, "SSH_ASKPASS_REQUIRE": "force", "DISPLAY": "codex-devices:0", "CODEX_DEVICES_ASKPASS_SESSION": UUID().uuidString, "CODEX_DEVICES_ASKPASS_DEADLINE": String(Int(Date().timeIntervalSince1970 + 60))]
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh"), .sshBegin)
         let result = try await runner(ProcessRequest(executable: URL(fileURLWithPath: "/usr/bin/ssh"), arguments: arguments, environment: environment, timeout: 75, outputLimit: 8192))
+        SSHProcessDiagnostics.emit(URL(fileURLWithPath: "/usr/bin/ssh"), .sshReturned, status: result.status)
         return try Self.parseInspection(result, candidate: candidate, hostKey: String(digest))
     }
     private func localHostKey() async throws -> String? {

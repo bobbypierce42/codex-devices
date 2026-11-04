@@ -1,5 +1,25 @@
 import Foundation
 import Darwin
+import OSLog
+
+enum SSHProcessDiagnostics {
+    enum Stage: String {
+        case launchBegin, launchFailed, launched, outputFlagsFailed, inputFlagsFailed, inputSignalFlagFailed
+        case pipesReady, inputClosed, inputCloseFailed, inputWriteFailed, outputReadFailed, outputEOF, incompleteInput, canceled, timedOut, outputLimit, childExit
+        case keyscanBegin, keyscanReturned, fingerprintBegin, fingerprintReturned, sshBegin, sshReturned
+    }
+    private static let logger = Logger(subsystem: "org.codex-devices.desktop", category: "SSHProcess")
+    static func emit(_ executable: URL, _ stage: Stage, status: Int32 = -1, errorNumber: Int32 = 0) {
+        let label: String
+        switch executable.path {
+        case "/usr/bin/ssh": label = "ssh"
+        case "/usr/bin/ssh-keyscan": label = "keyscan"
+        case "/usr/bin/ssh-keygen": label = "keygen"
+        default: return
+        }
+        logger.notice("process=\(label, privacy: .public) stage=\(stage.rawValue, privacy: .public) exit=\(status, privacy: .public) errno=\(errorNumber, privacy: .public)")
+    }
+}
 
 public struct ProcessRequest: Sendable {
     public let executable: URL
@@ -34,47 +54,69 @@ public enum NativeProcess {
         for (key, value) in request.environment { env[key] = value }
         child.environment = env; child.standardInput = input; child.standardOutput = output
         child.standardError = FileHandle.nullDevice
-        do { try child.run() } catch { throw ServiceError.unavailable }
+        SSHProcessDiagnostics.emit(request.executable, .launchBegin)
+        do { try child.run() } catch {
+            let failure = error as NSError
+            let number = failure.domain == NSPOSIXErrorDomain ? Int32(clamping: failure.code) : 0
+            SSHProcessDiagnostics.emit(request.executable, .launchFailed, errorNumber: number)
+            throw ServiceError.unavailable
+        }
+        SSHProcessDiagnostics.emit(request.executable, .launched)
         defer {
             try? input.fileHandleForWriting.close(); try? output.fileHandleForReading.close()
             if child.isRunning { child.terminate(); usleep(20_000); if child.isRunning { kill(child.processIdentifier, SIGKILL) } }
             child.waitUntilExit()
+            SSHProcessDiagnostics.emit(request.executable, .childExit, status: child.terminationStatus)
         }
         let descriptor = output.fileHandleForReading.fileDescriptor
         let inputDescriptor = input.fileHandleForWriting.fileDescriptor
-        guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0,
-              fcntl(inputDescriptor, F_SETFL, O_NONBLOCK) == 0,
-              fcntl(inputDescriptor, F_SETNOSIGPIPE, 1) == 0 else { throw ServiceError.unavailable }
+        guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0 else {
+            SSHProcessDiagnostics.emit(request.executable, .outputFlagsFailed, errorNumber: errno); throw ServiceError.unavailable
+        }
+        guard fcntl(inputDescriptor, F_SETFL, O_NONBLOCK) == 0 else {
+            SSHProcessDiagnostics.emit(request.executable, .inputFlagsFailed, errorNumber: errno); throw ServiceError.unavailable
+        }
+        guard fcntl(inputDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
+            SSHProcessDiagnostics.emit(request.executable, .inputSignalFlagFailed, errorNumber: errno); throw ServiceError.unavailable
+        }
+        SSHProcessDiagnostics.emit(request.executable, .pipesReady)
         var written = 0, inputClosed = false
         var received = Data(); let deadline = Date().addingTimeInterval(request.timeout)
         var bytes = [UInt8](repeating: 0, count: 8192)
         while true {
-            if Task.isCancelled { throw ServiceError.canceled }
-            if Date() >= deadline { throw ServiceError.timeout }
+            if Task.isCancelled { SSHProcessDiagnostics.emit(request.executable, .canceled); throw ServiceError.canceled }
+            if Date() >= deadline { SSHProcessDiagnostics.emit(request.executable, .timedOut); throw ServiceError.timeout }
             if !inputClosed {
                 if written < request.input.count {
                     let count = request.input.withUnsafeBytes { buffer in
                         Darwin.write(inputDescriptor, buffer.baseAddress!.advanced(by: written), min(8192, request.input.count - written))
                     }
                     if count > 0 { written += count }
-                    else if count < 0 && errno != EAGAIN && errno != EINTR { throw ServiceError.unavailable }
+                    else if count < 0 && errno != EAGAIN && errno != EINTR {
+                        SSHProcessDiagnostics.emit(request.executable, .inputWriteFailed, errorNumber: errno); throw ServiceError.unavailable
+                    }
                 }
-                if written == request.input.count { try input.fileHandleForWriting.close(); inputClosed = true }
+                if written == request.input.count {
+                    do { try input.fileHandleForWriting.close() }
+                    catch { SSHProcessDiagnostics.emit(request.executable, .inputCloseFailed, errorNumber: errno); throw error }
+                    inputClosed = true
+                    SSHProcessDiagnostics.emit(request.executable, .inputClosed)
+                }
             }
             let count = Darwin.read(descriptor, &bytes, bytes.count)
             if count > 0 {
-                guard received.count + count <= request.outputLimit else { throw ServiceError.oversized }
+                guard received.count + count <= request.outputLimit else { SSHProcessDiagnostics.emit(request.executable, .outputLimit); throw ServiceError.oversized }
                 received.append(contentsOf: bytes.prefix(count))
-            } else if count == 0 { break }
-            else if errno != EAGAIN && errno != EINTR { throw ServiceError.unavailable }
+            } else if count == 0 { SSHProcessDiagnostics.emit(request.executable, .outputEOF); break }
+            else if errno != EAGAIN && errno != EINTR { SSHProcessDiagnostics.emit(request.executable, .outputReadFailed, errorNumber: errno); throw ServiceError.unavailable }
             else { usleep(10_000) }
         }
         while child.isRunning {
-            if Task.isCancelled { throw ServiceError.canceled }
-            guard Date() < deadline else { throw ServiceError.timeout }
+            if Task.isCancelled { SSHProcessDiagnostics.emit(request.executable, .canceled); throw ServiceError.canceled }
+            guard Date() < deadline else { SSHProcessDiagnostics.emit(request.executable, .timedOut); throw ServiceError.timeout }
             usleep(10_000)
         }
-        guard written == request.input.count else { throw ServiceError.unavailable }
+        guard written == request.input.count else { SSHProcessDiagnostics.emit(request.executable, .incompleteInput); throw ServiceError.unavailable }
         return ProcessResult(status: child.terminationStatus, output: received)
     }
 }

@@ -30,7 +30,7 @@ struct CodexDevicesApp: App {
                 .appendingPathComponent("Codex Devices", isDirectory: true)
             _coordinator = StateObject(wrappedValue: RepairCoordinator(
                 engineURL: resources.appendingPathComponent("codex-devices"),
-                helperURL: resources.appendingPathComponent("SSHAskpass"),
+                helperURL: resources.appendingPathComponent("Codex Devices SSH.app/Contents/MacOS/SSHAskpass"),
                 artifactParent: support.appendingPathComponent("Operations", isDirectory: true),
                 trust: { challenge in await NativePrompts.trust(challenge) }
             ))
