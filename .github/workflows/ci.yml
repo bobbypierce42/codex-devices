@@ -60,7 +60,7 @@ jobs:
       - name: Lint all targets
         run: cargo +${{ matrix.rust }} clippy --locked --all-targets -- -D warnings
       - name: Test synthetic workflows
-        run: cargo +${{ matrix.rust }} test --locked
+        run: cargo +${{ matrix.rust }} test --locked -- --test-threads=1
       - name: Build release executable
         run: cargo +${{ matrix.rust }} build --locked --release
       - name: Test native app with synthetic providers
