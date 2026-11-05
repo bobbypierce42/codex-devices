@@ -30,8 +30,9 @@ impl Snapshot {
         if bytes.len() as u64 > MAX_BYTES {
             return Err(Error::refused("Snapshot exceeds the 4 MiB limit."));
         }
-        let raw: Value =
-            serde_json::from_slice(bytes).map_err(|_| Error::refused("Invalid snapshot JSON."))?;
+        let raw = serde_json::from_slice::<crate::desktop::StrictValue>(bytes)
+            .map_err(|_| Error::refused("Invalid snapshot JSON."))?
+            .0;
         crate::reject_credentials(&raw)?;
         let catalog: Catalog = serde_json::from_slice(bytes).map_err(|_| {
             Error::refused(

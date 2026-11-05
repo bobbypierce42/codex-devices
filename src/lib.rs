@@ -221,13 +221,15 @@ pub fn audit(bytes: &[u8]) -> Result<AuditReport> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err(Error::refused("Catalog exceeds the 4 MiB limit."));
     }
-    let raw: Value = serde_json::from_slice(bytes).map_err(|e| {
-        Error::refused(format!(
-            "Invalid catalog JSON at line {}, column {}.",
-            e.line(),
-            e.column()
-        ))
-    })?;
+    let raw = serde_json::from_slice::<desktop::StrictValue>(bytes)
+        .map_err(|e| {
+            Error::refused(format!(
+                "Invalid catalog JSON at line {}, column {}.",
+                e.line(),
+                e.column()
+            ))
+        })?
+        .0;
     reject_credentials(&raw)?;
     let catalog: Catalog = serde_json::from_slice(bytes).map_err(|_| Error::refused("Catalog does not match the synthetic schema; known fields must be unique and page cursors explicit strings or null."))?;
     if catalog.schema_version != 1 || catalog.source.kind != "synthetic" {

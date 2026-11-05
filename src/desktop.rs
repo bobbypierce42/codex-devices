@@ -138,7 +138,7 @@ fn hash(s: &str) -> bool {
         && s.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
-struct StrictValue(Value);
+pub(crate) struct StrictValue(pub(crate) Value);
 impl<'de> Deserialize<'de> for StrictValue {
     fn deserialize<D: serde::Deserializer<'de>>(
         deserializer: D,

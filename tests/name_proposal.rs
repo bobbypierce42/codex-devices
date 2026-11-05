@@ -33,6 +33,38 @@ fn bytes(value: &Value) -> Vec<u8> {
 }
 
 #[test]
+fn duplicate_unknown_keys_cannot_hide_credentials_in_backup() {
+    let json = String::from_utf8(bytes(&snapshot())).unwrap();
+    let input = json.replacen(
+        '{',
+        "{\"extra\":{\"authToken\":\"invented-secret\"},\"extra\":{},",
+        1,
+    );
+    let path = scratch().join("proposal");
+    assert!(
+        prepare_name_proposal(
+            input.as_bytes(),
+            "demo-active-laptop",
+            "Field laptop",
+            &path
+        )
+        .is_err()
+    );
+    assert!(!path.exists());
+}
+
+#[test]
+fn duplicate_unknown_keys_cannot_hide_credentials_in_synthetic_audit() {
+    let json = std::str::from_utf8(codex_devices::DEMO).unwrap();
+    let input = json.replacen(
+        '{',
+        "{\"extra\":{\"authToken\":\"invented-secret\"},\"extra\":{},",
+        1,
+    );
+    assert!(codex_devices::audit(input.as_bytes()).is_err());
+}
+
+#[test]
 fn user_app_connection_is_preserved_and_other_user_types_are_refused() {
     let root = scratch();
     let mut before = snapshot();
