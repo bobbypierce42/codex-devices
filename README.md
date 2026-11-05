@@ -126,10 +126,10 @@ if an operation stops. SSH trust remains under the separate `Operations/ssh`
 folder. Passwords are never saved. Existing Codex sign-in is used without login,
 logout or forced refresh. No installation ID is rotated or stale entry deleted.
 
-The internal API is unsupported and can change. Root-page continuation assumes a
-`cursor` query parameter and has only synthetic coverage. A successful build, fixture run
-or app launch does not establish live SSH, account or repair compatibility. Native
-window and live repair acceptance remain separately qualified. Native tests use
+The internal API is unsupported and can change. Root and computer-list pagination
+assume a `cursor` query parameter and have only synthetic coverage. A successful
+build, fixture run or app launch does not establish live SSH, account or repair
+compatibility. Native window and live repair acceptance remain separately qualified. Native tests use
 invented providers, explicit temporary paths and the built Rust engine. XCTest
 requires full Xcode. If standalone command-line tools are selected, choose Xcode
 for this invocation only:

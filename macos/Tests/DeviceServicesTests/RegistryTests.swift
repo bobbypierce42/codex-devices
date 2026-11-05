@@ -36,6 +36,24 @@ final class RegistryTests: XCTestCase {
         let repeated = HTTPFixture([.init(status: 200, data: Data(first.utf8)), .init(status: 200, data: Data(first.utf8))])
         await assertServiceError(.invalidResponse) { _ = try await RegistryClient(transport: { try await repeated.send($0) }).capture(account: fixtureAccount()) }
     }
+    func testComputerScopePaginationPreservesPagesAndRejectsLoops() async throws {
+        let fixture = try fixtureCapture()
+        let first = #"{"thread_id":"thread-one","computers":[],"next_cursor":"next"}"#
+        let last = fixture.scopes[0].computersResponse
+        let http = HTTPFixture([.init(status: 200, data: Data(fixture.rootResponse.utf8)), .init(status: 200, data: Data(first.utf8)), .init(status: 200, data: Data(last.utf8)), .init(status: 200, data: Data(fixture.scopes[1].computersResponse.utf8))])
+        let capture = try await RegistryClient(transport: { try await http.send($0) }).capture(account: fixtureAccount())
+        XCTAssertEqual(try capture.devices().first?.occurrences.count, 2)
+        XCTAssertEqual(capture.json["scopes"].array?.first?["computer_followup_pages"].array?.first?["response_utf8"].string, last)
+        let engine = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("target/release/codex-devices")
+        let directory = try temporaryDirectory().appendingPathComponent("engine")
+        let receipt = try await EngineClient(executable: engine).send(.object(["schema_version": .number(1), "op": .string("prepare"), "operation_directory": .string(directory.path), "evidence_mode": .string("registry-label"), "capture": capture.json, "selections": .array([.object(["environment_id": .string("env-studio"), "new_name": .string("Studio")])]), "peers": .array([])]))
+        XCTAssertEqual(receipt.status, "prepared")
+        XCTAssertEqual(try JSONValue.parse(Data(contentsOf: directory.appendingPathComponent("before.json"))), capture.json)
+        let requests = await http.requests
+        XCTAssertEqual(URLComponents(url: requests[2].url, resolvingAgainstBaseURL: false)?.queryItems?.last, URLQueryItem(name: "cursor", value: "next"))
+        let repeated = HTTPFixture([.init(status: 200, data: Data(fixture.rootResponse.utf8)), .init(status: 200, data: Data(first.utf8)), .init(status: 200, data: Data(first.utf8))])
+        await assertServiceError(.invalidResponse) { _ = try await RegistryClient(transport: { try await repeated.send($0) }).capture(account: fixtureAccount()) }
+    }
     func testExactCompleteCaptureAndAllowedNameOnlyRequest() async throws {
         let fixture = try fixtureCapture()
         let replies = [HTTPResult(status: 200, data: Data(fixture.rootResponse.utf8))] + fixture.scopes.map { HTTPResult(status: 200, data: Data($0.computersResponse.utf8)) } + [.init(status: 200, data: Data(#"{"executor_id":"env-studio","custom_display_name":"Studio"}"#.utf8))]

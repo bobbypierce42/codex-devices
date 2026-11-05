@@ -93,6 +93,37 @@ fn root_pagination_preserves_pages_and_rejects_broken_chains() {
     assert_eq!(prepare(&path(), &broken, &peers).0, 3);
 }
 #[test]
+fn computer_pagination_preserves_and_checks_every_page() {
+    let (mut capture, peers) = fixture();
+    let last = capture["scopes"][0]["computers_response_utf8"].clone();
+    capture["scopes"][0]["computers_response_utf8"] =
+        json!(json!({"thread_id":"thread-a","computers":[],"next_cursor":"next"}).to_string());
+    capture["scopes"][0]["computer_followup_pages"] =
+        json!([{"cursor":"next","response_utf8":last}]);
+    let p = path();
+    let (code, prepared) = prepare(&p, &capture, &peers);
+    assert_eq!(code, 0);
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(format!("{p}/before.json")).unwrap()).unwrap();
+    assert_eq!(saved, capture);
+    let mut broken = capture.clone();
+    broken["scopes"][0]["computer_followup_pages"][0]["cursor"] = json!("wrong");
+    assert_eq!(prepare(&path(), &broken, &peers).0, 3);
+    let digest = &prepared["plan_sha256"];
+    let request = |op: &str, capture: &Value| json!({"schema_version":1,"op":op,"operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture,"peers":peers});
+    assert_eq!(invoke(&request("intent", &capture)).0, 0);
+    let raw = capture["scopes"][0]["computer_followup_pages"][0]["response_utf8"]
+        .as_str()
+        .unwrap();
+    let mut page: Value = serde_json::from_str(raw).unwrap();
+    page["computers"][0]["display_name"] = json!("New");
+    capture["scopes"][0]["computer_followup_pages"][0]["response_utf8"] = json!(page.to_string());
+    update_scope(&mut capture, 1, |v| {
+        v["computers"][0]["display_name"] = json!("New")
+    });
+    assert_eq!(invoke(&json!({"schema_version":1,"op":"reconcile","operation_directory":p,"plan_sha256":digest,"environment_id":"env-a","capture":capture})).0, 0);
+}
+#[test]
 fn collision_and_disagreement_refuse() {
     let (mut capture, peers) = fixture();
     update_scope(&mut capture, 1, |v| {

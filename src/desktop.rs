@@ -20,6 +20,8 @@ struct Scope {
     dot_id: String,
     thread_id: String,
     computers_response_utf8: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    computer_followup_pages: Vec<RootPage>,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -116,7 +118,7 @@ type GlobalRow = (
 struct Aggregate {
     account: String,
     mapping: BTreeMap<String, String>,
-    scopes: BTreeMap<String, Value>,
+    scopes: BTreeMap<String, Vec<Value>>,
     rows: BTreeMap<String, GlobalRow>,
 }
 fn refused() -> Error {
@@ -286,43 +288,73 @@ impl Aggregate {
             if mapping.get(&scope.dot_id) != Some(&scope.thread_id) {
                 return Err(refused());
             }
-            let v = parse_raw(&scope.computers_response_utf8)?;
-            if v.get("thread_id").and_then(Value::as_str) != Some(&scope.thread_id)
-                || v.get("next_cursor") != Some(&Value::Null)
-            {
+            if scope.computer_followup_pages.len() > 4096 {
                 return Err(refused());
             }
-            let computers = v
-                .get("computers")
-                .and_then(Value::as_array)
-                .ok_or_else(refused)?;
             let mut seen = BTreeSet::new();
-            for row in computers {
-                let id = string(row, "environment_id")?;
-                if !seen.insert(id.clone()) {
+            let mut expected: Option<String> = None;
+            let mut cursors = BTreeSet::new();
+            let mut scope_pages = Vec::new();
+            let pages = std::iter::once((None, scope.computers_response_utf8.as_str())).chain(
+                scope
+                    .computer_followup_pages
+                    .iter()
+                    .map(|page| (Some(page.cursor.as_str()), page.response_utf8.as_str())),
+            );
+            for (cursor, raw) in pages {
+                if cursor != expected.as_deref() {
                     return Err(refused());
                 }
-                let installation = nullable_string(row, "installation_id")?;
-                if installation.as_ref().is_some_and(|s| !ident(s)) {
+                let v = parse_raw(raw)?;
+                if v.get("thread_id").and_then(Value::as_str) != Some(&scope.thread_id) {
                     return Err(refused());
                 }
-                let kind = string(row, "kind")?;
-                let typ = nullable_string(row, "computer_type")?;
-                let name = nullable_string(row, "display_name")?;
-                let status = nullable_string(row, "status")?;
-                let tuple = (installation, kind, typ, name, status);
-                if let Some(previous) = rows.get(&id) {
-                    if previous != &tuple {
+                let computers = v
+                    .get("computers")
+                    .and_then(Value::as_array)
+                    .ok_or_else(refused)?;
+                for row in computers {
+                    let id = string(row, "environment_id")?;
+                    if !seen.insert(id.clone()) {
                         return Err(refused());
                     }
-                } else {
-                    rows.insert(id, tuple);
-                    if rows.len() > 4096 {
+                    let installation = nullable_string(row, "installation_id")?;
+                    if installation.as_ref().is_some_and(|s| !ident(s)) {
                         return Err(refused());
+                    }
+                    let kind = string(row, "kind")?;
+                    let typ = nullable_string(row, "computer_type")?;
+                    let name = nullable_string(row, "display_name")?;
+                    let status = nullable_string(row, "status")?;
+                    let tuple = (installation, kind, typ, name, status);
+                    if let Some(previous) = rows.get(&id) {
+                        if previous != &tuple {
+                            return Err(refused());
+                        }
+                    } else {
+                        rows.insert(id, tuple);
+                        if rows.len() > 4096 {
+                            return Err(refused());
+                        }
                     }
                 }
+                expected = match v.get("next_cursor") {
+                    Some(Value::Null) => None,
+                    Some(Value::String(value))
+                        if !value.is_empty()
+                            && value.len() <= 4096
+                            && cursors.insert(value.clone()) =>
+                    {
+                        Some(value.clone())
+                    }
+                    _ => return Err(refused()),
+                };
+                scope_pages.push(v);
             }
-            if scopes.insert(scope.dot_id.clone(), v).is_some() {
+            if expected.is_some() {
+                return Err(refused());
+            }
+            if scopes.insert(scope.dot_id.clone(), scope_pages).is_some() {
                 return Err(refused());
             }
         }
@@ -335,9 +367,11 @@ impl Aggregate {
     }
     fn renamed(&mut self, row: &Row) {
         for scope in self.scopes.values_mut() {
-            for record in scope["computers"].as_array_mut().expect("validated") {
-                if record["environment_id"].as_str() == Some(&row.environment_id) {
-                    record["display_name"] = Value::String(row.new_name.clone());
+            for page in scope {
+                for record in page["computers"].as_array_mut().expect("validated") {
+                    if record["environment_id"].as_str() == Some(&row.environment_id) {
+                        record["display_name"] = Value::String(row.new_name.clone());
+                    }
                 }
             }
         }
@@ -372,14 +406,16 @@ fn plan(
             return Err(refused());
         }
         if aggregate.scopes.values().any(|scope| {
-            scope["computers"]
-                .as_array()
-                .expect("validated")
-                .iter()
-                .any(|row| {
-                    row["environment_id"].as_str() == Some(&choice.environment_id)
-                        && row.get("computer_type").is_none()
-                })
+            scope.iter().any(|page| {
+                page["computers"]
+                    .as_array()
+                    .expect("validated")
+                    .iter()
+                    .any(|row| {
+                        row["environment_id"].as_str() == Some(&choice.environment_id)
+                            && row.get("computer_type").is_none()
+                    })
+            })
         }) {
             return Err(refused());
         }
