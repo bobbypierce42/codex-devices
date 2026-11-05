@@ -56,6 +56,18 @@ import XCTest
         let intent = try XCTUnwrap(events.firstIndex(of: "intent")), post = try XCTUnwrap(events.firstIndex(of: "POST")), reconcile = try XCTUnwrap(events.firstIndex(of: "reconcile"))
         XCTAssertLessThan(intent, post); XCTAssertLessThan(post, reconcile)
     }
+    func testRestartAfterVerifiedOperationAllowsAnotherReview() async throws {
+        let (fixture, parent, model) = try setup()
+        await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
+        await model.applyReviewed(planDigest: try XCTUnwrap(model.receipt).planSHA256)
+        XCTAssertEqual(model.phase, .verified)
+        let restarted = RegistryWorkflow(providers: fixture.providers, artifactParent: parent)
+        await restarted.refresh()
+        XCTAssertEqual(restarted.phase, .ready)
+        await restarted.prepare(environmentID: "env-studio", newName: "Another Studio")
+        XCTAssertEqual(restarted.phase, .review)
+        let events = await fixture.events(); XCTAssertEqual(events.filter { $0 == "POST" }.count, 1)
+    }
     func testRestartRestoresPreparedReviewWithoutApplying() async throws {
         let (fixture, parent, model) = try setup()
         await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")

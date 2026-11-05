@@ -53,6 +53,11 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
                 if saved.status == "prepared", saved.records[0].state == "pending" {
                     unresolvedReference = false
                     phase = .review; message = "A saved review is ready. Check its names and backup before applying."
+                } else if saved.status == "verified", saved.records[0].state == "verified",
+                          (try? RegistryResponseEvidence.read(directory: directory, digest: reference.digest, environmentID: saved.records[0].environmentID)) == .accepted {
+                    unresolvedReference = false
+                    receipt = nil; operationDirectory = nil; phase = .ready
+                    message = "Previous operation verified. Select a computer to review a different label."
                 } else {
                     phase = .uncertain; message = "A prior operation needs fresh readback. Its request will not be repeated."
                 }
