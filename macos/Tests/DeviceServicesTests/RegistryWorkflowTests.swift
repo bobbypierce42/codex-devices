@@ -76,6 +76,18 @@ import XCTest
         XCTAssertEqual(restarted.phase, .review); XCTAssertEqual(restarted.receipt?.planSHA256, model.receipt?.planSHA256)
         let events = await fixture.events(); XCTAssertFalse(events.contains("POST"))
     }
+    func testInterruptedBeforeIntentRestoresReviewWithoutRestart() async throws {
+        let (fixture, _, model) = try setup()
+        await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
+        let digest = try XCTUnwrap(model.receipt).planSHA256
+        await fixture.failNextIntent()
+        await model.applyReviewed(planDigest: digest)
+        XCTAssertEqual(model.phase, .review)
+        let before = await fixture.events(); XCTAssertFalse(before.contains("POST"))
+        await model.applyReviewed(planDigest: digest)
+        XCTAssertEqual(model.phase, .verified)
+        let after = await fixture.events(); XCTAssertEqual(after.filter { $0 == "POST" }.count, 1)
+    }
     func testRestartAfterUnknownResponseRemainsReadbackOnlyAndUncertain() async throws {
         let (fixture, parent, model) = try setup()
         await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
@@ -143,7 +155,7 @@ import XCTest
 private actor RegistryWorkflowFixture {
     enum Variant { case personal, cloud, collision }
     private let engine: EngineClient
-    private var name = "Old Studio", lostReply = false, engineFailsAfterPOST = false
+    private var name = "Old Studio", lostReply = false, engineFailsAfterPOST = false, intentFailsOnce = false
     private var variant: Variant = .personal
     private var log = [String](), prepared: JSONValue?
     init(engine: URL) { self.engine = EngineClient(executable: engine) }
@@ -155,6 +167,7 @@ private actor RegistryWorkflowFixture {
     func setVariant(_ value: Variant) { variant = value }
     func setLostReply() { lostReply = true }
     func failEngineAfterPOST() { engineFailsAfterPOST = true }
+    func failNextIntent() { intentFailsOnce = true }
     private func account() throws -> AccountSession { log.append("account"); return try fixtureAccount() }
     private func capture(_ account: AccountSession) throws -> RegistryCapture {
         log.append("capture")
@@ -180,6 +193,7 @@ private actor RegistryWorkflowFixture {
             let directory = URL(fileURLWithPath: request["operation_directory"].string!).deletingLastPathComponent()
             let witness = try JSONValue.parse(Data(contentsOf: directory.appendingPathComponent("registry-response.json")))
             XCTAssertEqual(witness["outcome"], .string("unknown"))
+            if intentFailsOnce { intentFailsOnce = false; throw ServiceError.unavailable }
         }
         log.append(op); return try await engine.send(request)
     }

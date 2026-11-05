@@ -107,6 +107,12 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
                 do { try await loadRecords() } catch { message += " The computer list could not be refreshed." }
             } else {
                 receipt = try await runner.review(operationDirectory: directory, planSHA256: digest)
+                if let receipt, receipt.status == "prepared", receipt.records[0].state == "pending",
+                   (try? RegistryResponseEvidence.read(directory: directory, digest: digest, environmentID: receipt.records[0].environmentID)) == .unknown {
+                    unresolvedReference = false; phase = .review
+                    message = "No intent was recorded. Review the saved change before retrying."
+                    return
+                }
                 phase = result.exitCode == 4 || receipt?.records[0].state != "pending" ? .uncertain : .failed
                 unresolvedReference = phase == .uncertain
                 message = result.json?["reason_code"].string == "response-unconfirmed" || result.json?["reason_code"].string == "response-mismatch"
