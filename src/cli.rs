@@ -37,6 +37,16 @@ pub(super) enum Command {
         out: PathBuf,
         changes: Vec<RenameChange>,
     },
+    PrepareNameProposal {
+        snapshot: PathBuf,
+        out: PathBuf,
+        change: RenameChange,
+    },
+    VerifyNameProposal {
+        directory: PathBuf,
+        expected: String,
+        after: Option<PathBuf>,
+    },
     ApplyRename {
         directory: PathBuf,
         approved: String,
@@ -83,6 +93,8 @@ impl Arguments {
                     }
                 }
                 "--input"
+                | "--snapshot"
+                | "--name-proposal"
                 | "--app-server"
                 | "--peer"
                 | "--out"
@@ -188,7 +200,7 @@ fn rename(args: &mut Arguments) -> Result<Command> {
                     "Rename preview needs explicit --set FULL_ID=NAME mappings.",
                 ));
             }
-            let changes = raw
+            let changes: Vec<RenameChange> = raw
                 .into_iter()
                 .map(|value| {
                     let value = value
@@ -204,11 +216,24 @@ fn rename(args: &mut Arguments) -> Result<Command> {
                     })
                 })
                 .collect::<Result<_>>()?;
-            Ok(Command::PrepareRename {
-                source: args.source()?,
-                out: args.path("--out")?,
-                changes,
-            })
+            if let Some(snapshot) = args.value("--snapshot") {
+                if changes.len() != 1 {
+                    return Err(usage(
+                        "A name-only proposal requires exactly one --set FULL_ID=NAME.",
+                    ));
+                }
+                Ok(Command::PrepareNameProposal {
+                    snapshot: snapshot.into(),
+                    out: args.path("--out")?,
+                    change: changes.into_iter().next().expect("one mapping"),
+                })
+            } else {
+                Ok(Command::PrepareRename {
+                    source: args.source()?,
+                    out: args.path("--out")?,
+                    changes,
+                })
+            }
         }
         _ => Err(usage("Choose only one of --apply or --resume.")),
     }
@@ -232,6 +257,15 @@ fn cleanup(args: &mut Arguments) -> Result<Command> {
 }
 
 fn verification(args: &mut Arguments) -> Result<Command> {
+    if let Some(directory) = args.value("--name-proposal") {
+        return Ok(Command::VerifyNameProposal {
+            directory: directory.into(),
+            expected: args.text("--expected-plan-sha256")?.ok_or_else(|| {
+                usage("Name proposal verification requires --expected-plan-sha256.")
+            })?,
+            after: args.value("--input").map(PathBuf::from),
+        });
+    }
     match (args.value("--backup"), args.value("--operation")) {
         (Some(directory), None) => Ok(Command::VerifyBackup {
             directory: directory.into(),
