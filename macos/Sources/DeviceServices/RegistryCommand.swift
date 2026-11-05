@@ -224,6 +224,10 @@ enum RegistryResponseEvidence {
         if !create { _ = try read(directory: directory, digest: digest, environmentID: environmentID) }
         let temporary = create ? filename : "registry-response-next-\(UUID().uuidString).json"
         let fd = openat(dir, temporary, O_WRONLY | O_NOFOLLOW | O_CLOEXEC | O_CREAT | O_EXCL, 0o600)
+        if fd < 0 && create && errno == EEXIST {
+            guard try read(directory: directory, digest: digest, environmentID: environmentID) == .unknown else { throw ServiceError.refused }
+            return
+        }
         guard fd >= 0 else { throw ServiceError.refused }; defer { close(fd) }
         try validate(fd)
         let bytes = try JSONValue.object(["plan_sha256": .string(digest), "environment_id": .string(environmentID), "outcome": .string(outcome.rawValue)]).data()

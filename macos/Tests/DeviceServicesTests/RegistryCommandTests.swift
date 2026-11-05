@@ -61,6 +61,24 @@ final class RegistryCommandTests: XCTestCase {
         XCTAssertEqual(witness["outcome"], .string("accepted")); XCTAssertEqual(witness["plan_sha256"], .string(digest))
         XCTAssertFalse(String(data: try witness.data(), encoding: .utf8)!.contains(fixtureInstallation))
     }
+    func testInterruptedBeforeIntentCanReuseOnlyMatchingUnknownWitness() async throws {
+        for outcome in [RegistryResponseEvidence.Outcome.unknown, .accepted, .rejected] {
+            let (fixture, directory) = try setupFixture(), digest = try await prepare(fixture, directory)
+            try RegistryResponseEvidence.create(directory: directory, digest: digest, environmentID: "env-studio")
+            if outcome != .unknown {
+                try RegistryResponseEvidence.update(directory: directory, digest: digest, environmentID: "env-studio", outcome: outcome)
+            }
+            let result = await RegistryCommandRunner(providers: fixture.providers).run(arguments: ["apply", "--operation", directory.path, "--approve-plan-sha256", digest])
+            XCTAssertEqual(result.exitCode, outcome == .unknown ? 0 : 3, result.output)
+            let events = await fixture.events()
+            XCTAssertEqual(events.filter { $0 == "POST" }.count, outcome == .unknown ? 1 : 0)
+        }
+        let (fixture, directory) = try setupFixture(), digest = try await prepare(fixture, directory)
+        try RegistryResponseEvidence.create(directory: directory, digest: String(repeating: "0", count: 64), environmentID: "env-studio")
+        let result = await RegistryCommandRunner(providers: fixture.providers).run(arguments: ["apply", "--operation", directory.path, "--approve-plan-sha256", digest])
+        XCTAssertEqual(result.exitCode, 3)
+        let events = await fixture.events(); XCTAssertFalse(events.contains("POST"))
+    }
     func testWrongDigestAndAccountDriftPreventPOST() async throws {
         let (fixture, directory) = try setupFixture(), digest = try await prepare(fixture, directory)
         let runner = RegistryCommandRunner(providers: fixture.providers)
