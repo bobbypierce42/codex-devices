@@ -88,5 +88,5 @@ extension BonjourScan: NetServiceBrowserDelegate, NetServiceDelegate {
     nonisolated func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) { MainActor.assumeIsolated { found(service) } }
     nonisolated func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) { MainActor.assumeIsolated { finish(.unavailable) } }
     nonisolated func netServiceDidResolveAddress(_ sender: NetService) { MainActor.assumeIsolated { resolved(sender) } }
-    nonisolated func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) { MainActor.assumeIsolated { finish(.unavailable) } }
+    nonisolated func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) { }
 }
