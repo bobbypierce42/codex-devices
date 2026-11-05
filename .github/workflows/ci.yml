@@ -22,6 +22,8 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, macOS, ARM64, kalana-macos-ci]
     timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +37,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Bootstrap pinned Rustup in job-local storage
+        run: |
+          set -euo pipefail
+          test "$(uname -sm)" = "Darwin arm64"
+          export CARGO_HOME="$RUNNER_TEMP/codex-devices-cargo"
+          export RUSTUP_HOME="$RUNNER_TEMP/codex-devices-rustup"
+          installer="$RUNNER_TEMP/codex-devices-rustup-init"
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --fail --show-error --silent --location --max-time 120 \
+            --output "$installer" \
+            "https://static.rust-lang.org/rustup/archive/1.29.3/aarch64-apple-darwin/rustup-init"
+          printf '%s  %s\n' '63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f' "$installer" | shasum -a 256 -c -
+          chmod 700 "$installer"
+          "$installer" -y --no-modify-path --profile minimal --default-toolchain none
+          "$CARGO_HOME/bin/rustup" set auto-self-update disable
+          printf 'CARGO_HOME=%s\nRUSTUP_HOME=%s\n' "$CARGO_HOME" "$RUSTUP_HOME" >> "$GITHUB_ENV"
+          printf '%s\n' "$CARGO_HOME/bin" >> "$GITHUB_PATH"
       - name: Install Rust toolchain
         run: >-
           rustup toolchain install '${{ matrix.rust }}' --profile minimal
