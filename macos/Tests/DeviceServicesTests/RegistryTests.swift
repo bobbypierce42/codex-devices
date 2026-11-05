@@ -16,6 +16,26 @@ final class RegistryTests: XCTestCase {
         XCTAssertThrowsError(try fixtureCapture(rootThread: "moved-thread").devices())
         XCTAssertThrowsError(try fixtureCapture(nextCursor: .string("more")).devices())
     }
+    func testRootPagesRetainExactResponsesAndRejectRepeatedCursor() async throws {
+        let first = #"{"items":[{"id":"dot~one","active_root_thread_id":"thread-one","display_name":"One"}],"cursor":"more"}"#
+        let last = #"{"items":[{"id":"dot~two","active_root_thread_id":"thread-two","display_name":"Two"}],"cursor":null}"#
+        let fixture = try fixtureCapture()
+        let replies = [HTTPResult(status: 200, data: Data(first.utf8)), .init(status: 200, data: Data(last.utf8))] + fixture.scopes.map { HTTPResult(status: 200, data: Data($0.computersResponse.utf8)) }
+        let http = HTTPFixture(replies)
+        let capture = try await RegistryClient(transport: { try await http.send($0) }).capture(account: fixtureAccount())
+        XCTAssertEqual(capture.rootResponse, first)
+        XCTAssertEqual(try capture.devices().first?.occurrences.count, 2)
+        XCTAssertEqual(capture.json["root_followup_pages"].array?.first?["response_utf8"].string, last)
+        let engine = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("target/release/codex-devices")
+        let directory = try temporaryDirectory().appendingPathComponent("engine")
+        let receipt = try await EngineClient(executable: engine).send(.object(["schema_version": .number(1), "op": .string("prepare"), "operation_directory": .string(directory.path), "evidence_mode": .string("registry-label"), "capture": capture.json, "selections": .array([.object(["environment_id": .string("env-studio"), "new_name": .string("Studio")])]), "peers": .array([])]))
+        XCTAssertEqual(receipt.status, "prepared")
+        XCTAssertEqual(try JSONValue.parse(Data(contentsOf: directory.appendingPathComponent("before.json"))), capture.json)
+        let requests = await http.requests
+        XCTAssertEqual(URLComponents(url: requests[1].url, resolvingAgainstBaseURL: false)?.queryItems?.last, URLQueryItem(name: "cursor", value: "more"))
+        let repeated = HTTPFixture([.init(status: 200, data: Data(first.utf8)), .init(status: 200, data: Data(first.utf8))])
+        await assertServiceError(.invalidResponse) { _ = try await RegistryClient(transport: { try await repeated.send($0) }).capture(account: fixtureAccount()) }
+    }
     func testExactCompleteCaptureAndAllowedNameOnlyRequest() async throws {
         let fixture = try fixtureCapture()
         let replies = [HTTPResult(status: 200, data: Data(fixture.rootResponse.utf8))] + fixture.scopes.map { HTTPResult(status: 200, data: Data($0.computersResponse.utf8)) } + [.init(status: 200, data: Data(#"{"executor_id":"env-studio","custom_display_name":"Studio"}"#.utf8))]
@@ -37,7 +57,7 @@ final class RegistryTests: XCTestCase {
         XCTAssertEqual(requests[3].url.path, "/backend-api/flora/cca/executor")
         XCTAssertEqual(try JSONValue.parse(requests[3].body!), .object(["installation_id": .string(fixtureInstallation), "custom_display_name": .string("Studio")]))
     }
-    func testErrorsAreRedactedAndNoPaginationGuesses() async throws {
+    func testErrorsAreRedactedAndMissingPageRefuses() async throws {
         for status in [401, 403, 302, 500] {
             let http = HTTPFixture([.init(status: status, data: Data("secret body must not appear".utf8))])
             let client = RegistryClient(transport: { try await http.send($0) })
@@ -46,7 +66,7 @@ final class RegistryTests: XCTestCase {
             let count = await http.count(); XCTAssertEqual(count, 1)
         }
         let http = HTTPFixture([.init(status: 200, data: Data(#"{"items":[],"cursor":"more"}"#.utf8))])
-        await assertServiceError(.invalidResponse) { _ = try await RegistryClient(transport: { try await http.send($0) }).capture(account: fixtureAccount()) }
+        await assertServiceError(.unavailable) { _ = try await RegistryClient(transport: { try await http.send($0) }).capture(account: fixtureAccount()) }
         let redirect = HTTPFixture([.init(status: 200, data: Data(), redirected: true)])
         await assertServiceError(.refused) { _ = try await RegistryClient(transport: { try await redirect.send($0) }).capture(account: fixtureAccount()) }
     }

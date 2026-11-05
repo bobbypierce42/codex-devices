@@ -126,7 +126,8 @@ if an operation stops. SSH trust remains under the separate `Operations/ssh`
 folder. Passwords are never saved. Existing Codex sign-in is used without login,
 logout or forced refresh. No installation ID is rotated or stale entry deleted.
 
-The internal API is unsupported and can change. A successful build, fixture run
+The internal API is unsupported and can change. Root-page continuation assumes a
+`cursor` query parameter and has only synthetic coverage. A successful build, fixture run
 or app launch does not establish live SSH, account or repair compatibility. Native
 window and live repair acceptance remain separately qualified. Native tests use
 invented providers, explicit temporary paths and the built Rust engine. XCTest

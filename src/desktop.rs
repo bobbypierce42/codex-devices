@@ -23,10 +23,18 @@ struct Scope {
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
+struct RootPage {
+    cursor: String,
+    response_utf8: String,
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct Capture {
     schema_version: u32,
     source: Source,
     root_response_utf8: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    root_followup_pages: Vec<RootPage>,
     scopes: Vec<Scope>,
 }
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -230,24 +238,47 @@ impl Aggregate {
         {
             return Err(refused());
         }
-        let root = parse_raw(&c.root_response_utf8)?;
-        if root.get("cursor") != Some(&Value::Null) {
-            return Err(refused());
-        }
-        let items = root
-            .get("items")
-            .and_then(Value::as_array)
-            .ok_or_else(refused)?;
-        if items.len() > 4096 || items.len() != c.scopes.len() {
+        if c.root_followup_pages.len() > 4096 {
             return Err(refused());
         }
         let mut mapping = BTreeMap::new();
-        for item in items {
-            let id = string(item, "id")?;
-            let thread = string(item, "active_root_thread_id")?;
-            if mapping.insert(id, thread).is_some() {
+        let mut expected: Option<String> = None;
+        let mut seen_cursors = BTreeSet::new();
+        let pages = std::iter::once((None, c.root_response_utf8.as_str())).chain(
+            c.root_followup_pages
+                .iter()
+                .map(|page| (Some(page.cursor.as_str()), page.response_utf8.as_str())),
+        );
+        for (cursor, raw) in pages {
+            if cursor != expected.as_deref() {
                 return Err(refused());
             }
+            let root = parse_raw(raw)?;
+            let items = root
+                .get("items")
+                .and_then(Value::as_array)
+                .ok_or_else(refused)?;
+            for item in items {
+                let id = string(item, "id")?;
+                let thread = string(item, "active_root_thread_id")?;
+                if mapping.insert(id, thread).is_some() || mapping.len() > 4096 {
+                    return Err(refused());
+                }
+            }
+            expected = match root.get("cursor") {
+                Some(Value::Null) => None,
+                Some(Value::String(value))
+                    if !value.is_empty()
+                        && value.len() <= 4096
+                        && seen_cursors.insert(value.clone()) =>
+                {
+                    Some(value.clone())
+                }
+                _ => return Err(refused()),
+            };
+        }
+        if expected.is_some() || mapping.len() != c.scopes.len() {
+            return Err(refused());
         }
         let mut scopes = BTreeMap::new();
         let mut rows = BTreeMap::new();

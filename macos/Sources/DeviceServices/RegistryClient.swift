@@ -51,21 +51,42 @@ public enum NativeHTTP {
 public struct RegistryCapture: Sendable {
     public let accountIDHash: String
     public let rootResponse: String
+    public let rootFollowupPages: [RootPage]
     public let scopes: [Scope]
+    public struct RootPage: Sendable {
+        public let cursor: String
+        public let response: String
+        public init(cursor: String, response: String) { self.cursor = cursor; self.response = response }
+    }
     public struct Scope: Sendable {
         public let dotID: String
         public let threadID: String
         public let computersResponse: String
         public init(dotID: String, threadID: String, computersResponse: String) { self.dotID = dotID; self.threadID = threadID; self.computersResponse = computersResponse }
     }
-    public init(accountIDHash: String, rootResponse: String, scopes: [Scope]) { self.accountIDHash = accountIDHash; self.rootResponse = rootResponse; self.scopes = scopes }
+    public init(accountIDHash: String, rootResponse: String, scopes: [Scope], rootFollowupPages: [RootPage] = []) { self.accountIDHash = accountIDHash; self.rootResponse = rootResponse; self.scopes = scopes; self.rootFollowupPages = rootFollowupPages }
     public var json: JSONValue {
-        .object(["schema_version": .number(1), "source": .object(["kind": .string("desktop-aggregate"), "account_id_sha256": .string(accountIDHash)]), "root_response_utf8": .string(rootResponse), "scopes": .array(scopes.map { .object(["dot_id": .string($0.dotID), "thread_id": .string($0.threadID), "computers_response_utf8": .string($0.computersResponse)]) })])
+        var fields: [String: JSONValue] = ["schema_version": .number(1), "source": .object(["kind": .string("desktop-aggregate"), "account_id_sha256": .string(accountIDHash)]), "root_response_utf8": .string(rootResponse), "scopes": .array(scopes.map { .object(["dot_id": .string($0.dotID), "thread_id": .string($0.threadID), "computers_response_utf8": .string($0.computersResponse)]) })]
+        if !rootFollowupPages.isEmpty { fields["root_followup_pages"] = .array(rootFollowupPages.map { .object(["cursor": .string($0.cursor), "response_utf8": .string($0.response)]) }) }
+        return .object(fields)
     }
     public func devices() throws -> [LogicalDevice] {
         guard isHash(accountIDHash), scopes.count <= 4096 else { throw ServiceError.invalidResponse }
-        let root = try JSONValue.parse(Data(rootResponse.utf8))
-        guard case .object(let rootObject) = root, rootObject["cursor"] == .null, let items = root["items"].array, items.count == scopes.count else { throw ServiceError.invalidResponse }
+        guard rootFollowupPages.count <= 4096 else { throw ServiceError.invalidResponse }
+        var expected: String?; var seenCursors = Set<String>(); var items = [JSONValue]()
+        let pages = [(nil as String?, rootResponse)] + rootFollowupPages.map { (Optional($0.cursor), $0.response) }
+        for (cursor, raw) in pages {
+            guard cursor == expected else { throw ServiceError.invalidResponse }
+            let root = try JSONValue.parse(Data(raw.utf8))
+            guard case .object(let fields) = root, let pageItems = root["items"].array, let next = fields["cursor"] else { throw ServiceError.invalidResponse }
+            items += pageItems; guard items.count <= 4096 else { throw ServiceError.oversized }
+            if next == .null { expected = nil }
+            else {
+                guard let value = next.string, !value.isEmpty, value.utf8.count <= 4096, seenCursors.insert(value).inserted else { throw ServiceError.invalidResponse }
+                expected = value
+            }
+        }
+        guard expected == nil, items.count == scopes.count else { throw ServiceError.invalidResponse }
         var mapping = [String: String]()
         for item in items {
             guard let dot = item["id"].string, !dot.isEmpty, let thread = item["active_root_thread_id"].string, !thread.isEmpty,
@@ -133,10 +154,23 @@ public struct RegistryClient: Sendable {
         return result.data
     }
     public func capture(account: AccountSession) async throws -> RegistryCapture {
-        let data = try await request(account: account, path: "/backend-api/tbo", query: [URLQueryItem(name: "limit", value: "25"), URLQueryItem(name: "include_room_preview", value: "false")])
-        let root = try JSONValue.parse(data)
-        guard case .object(let object) = root, object["cursor"] == .null, let items = root["items"].array, items.count <= 4096, let raw = String(data: data, encoding: .utf8) else { throw ServiceError.invalidResponse }
-        var scopes = [RegistryCapture.Scope](); var total = data.count; var seen = Set<String>()
+        var cursor: String?; var seenCursors = Set<String>(); var pages = [RegistryCapture.RootPage](); var first = ""; var total = 0; var items = [JSONValue]()
+        repeat {
+            var query = [URLQueryItem(name: "limit", value: "25"), URLQueryItem(name: "include_room_preview", value: "false")]
+            if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+            let data = try await request(account: account, path: "/backend-api/tbo", query: query)
+            total += data.count; guard total <= 4 * 1024 * 1024, let raw = String(data: data, encoding: .utf8) else { throw ServiceError.oversized }
+            if let cursor { pages.append(.init(cursor: cursor, response: raw)) } else { first = raw }
+            let root = try JSONValue.parse(data)
+            guard case .object(let fields) = root, let pageItems = root["items"].array, let next = fields["cursor"] else { throw ServiceError.invalidResponse }
+            items += pageItems; guard items.count <= 4096, pages.count <= 4096 else { throw ServiceError.oversized }
+            if next == .null { cursor = nil }
+            else {
+                guard let value = next.string, !value.isEmpty, value.utf8.count <= 4096, seenCursors.insert(value).inserted else { throw ServiceError.invalidResponse }
+                cursor = value
+            }
+        } while cursor != nil
+        var scopes = [RegistryCapture.Scope](); var seen = Set<String>()
         for item in items {
             guard let dot = item["id"].string, !dot.isEmpty, !dot.contains("/"), !dot.contains("?"), !dot.contains("#"), dot != ".", dot != "..", !dot.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains), seen.insert(dot).inserted,
                   let thread = item["active_root_thread_id"].string, !thread.isEmpty, item["display_name"].string != nil else { throw ServiceError.invalidResponse }
@@ -144,7 +178,7 @@ public struct RegistryClient: Sendable {
             total += computers.count; guard total <= 4 * 1024 * 1024, let text = String(data: computers, encoding: .utf8) else { throw ServiceError.oversized }
             scopes.append(.init(dotID: dot, threadID: thread, computersResponse: text))
         }
-        let capture = RegistryCapture(accountIDHash: account.accountIDHash, rootResponse: raw, scopes: scopes)
+        let capture = RegistryCapture(accountIDHash: account.accountIDHash, rootResponse: first, scopes: scopes, rootFollowupPages: pages)
         _ = try capture.devices()
         return capture
     }

@@ -72,6 +72,27 @@ fn repeated_identity_in_two_scopes_is_one_logical_record() {
     assert_eq!(saved, capture);
 }
 #[test]
+fn root_pagination_preserves_pages_and_rejects_broken_chains() {
+    let (mut capture, peers) = fixture();
+    let root: Value =
+        serde_json::from_str(capture["root_response_utf8"].as_str().unwrap()).unwrap();
+    capture["root_response_utf8"] =
+        json!(json!({"items":[root["items"][0]],"cursor":"next"}).to_string());
+    capture["root_followup_pages"] = json!([{"cursor":"next","response_utf8":json!({"items":[root["items"][1]],"cursor":null}).to_string()}]);
+    let p = path();
+    assert_eq!(prepare(&p, &capture, &peers).0, 0);
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(format!("{p}/before.json")).unwrap()).unwrap();
+    assert_eq!(saved, capture);
+    let mut broken = capture.clone();
+    broken["root_followup_pages"][0]["cursor"] = json!("wrong");
+    assert_eq!(prepare(&path(), &broken, &peers).0, 3);
+    broken = capture.clone();
+    broken["root_followup_pages"][0]["response_utf8"] =
+        json!(json!({"items":[root["items"][1]],"cursor":"next"}).to_string());
+    assert_eq!(prepare(&path(), &broken, &peers).0, 3);
+}
+#[test]
 fn collision_and_disagreement_refuse() {
     let (mut capture, peers) = fixture();
     update_scope(&mut capture, 1, |v| {
