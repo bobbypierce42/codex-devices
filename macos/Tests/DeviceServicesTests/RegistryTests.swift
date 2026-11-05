@@ -104,6 +104,14 @@ final class RegistryTests: XCTestCase {
         }
     }
 
+    func testAppServerSelectionPrefersCodexAndFallsBackToChatGPT() throws {
+        let roots = ["/fixture/Codex.app", "/fixture/ChatGPT.app"]
+        let codex = roots[0] + "/Contents/Resources/codex-cli/bin/codex"
+        let chatgpt = roots[1] + "/Contents/Resources/codex-cli/bin/codex"
+        XCTAssertEqual(try AppServerSession.selectInstalledExecutable(apps: roots, isExecutable: { [codex, chatgpt].contains($0) }).path, codex)
+        XCTAssertEqual(try AppServerSession.selectInstalledExecutable(apps: roots, isExecutable: { $0 == chatgpt }).path, chatgpt)
+        XCTAssertThrowsError(try AppServerSession.selectInstalledExecutable(apps: roots, isExecutable: { _ in false }))
+    }
     func testAppServerReadOnlyHandshakeAndMetadataHash() async throws {
         let root = try temporaryDirectory(), script = root.appendingPathComponent("fixture-server"), log = root.appendingPathComponent("requests.jsonl")
         let token = try fixtureAccount().token

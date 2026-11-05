@@ -66,8 +66,11 @@ if the label appears correct; retain the entire operation for investigation.
 The backup is metadata evidence and does not promise automatic rollback.
 
 This uses an unsupported internal API and the existing desktop sign-in, with
-refresh disabled. It does not log in, log out, read installation-identity files,
-or delete registrations. Build and test commands do not access an account.
+refresh disabled. When both apps are installed, the native app and CLI prefer
+Codex.app; the CLI accepts `--app-server` to select another executable. Check
+that the selected app uses the intended account. The CLI does not log in, log
+out, read installation-identity files, or delete registrations. Build and test
+commands do not access an account.
 Cargo installation alone provides the Rust offline commands below; the native
 macOS commands require both executables from `build_cli.sh` kept together.
 Swift 5.9+, macOS 13+ and Rust are required. Use process-local `DEVELOPER_DIR`

@@ -24,11 +24,16 @@ public struct AppServerSession: Sendable {
     private let timeout: TimeInterval
     public init(executable: URL, timeout: TimeInterval = 15) { self.executable = executable; self.timeout = min(max(timeout, 0.01), 15) }
     public static func installedExecutable() throws -> URL {
-        let found = ["/Applications/Codex.app", "/Applications/ChatGPT.app"].compactMap { app in
-            ["Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"].map { URL(fileURLWithPath: app).appendingPathComponent($0) }.first { FileManager.default.isExecutableFile(atPath: $0.path) }
+        try selectInstalledExecutable(apps: ["/Applications/Codex.app", "/Applications/ChatGPT.app"], isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+    static func selectInstalledExecutable(apps: [String], isExecutable: (String) -> Bool) throws -> URL {
+        for app in apps {
+            for path in ["Contents/Resources/codex-cli/bin/codex", "Contents/Resources/codex"] {
+                let candidate = URL(fileURLWithPath: app).appendingPathComponent(path)
+                if isExecutable(candidate.path) { return candidate }
+            }
         }
-        guard found.count == 1, let result = found.first else { throw ServiceError.unavailable }
-        return result
+        throw ServiceError.unavailable
     }
     public func account() async throws -> AccountSession {
         let worker = Task.detached { try Self.exchange(executable: executable, timeout: timeout) }
