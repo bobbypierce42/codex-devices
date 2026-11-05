@@ -43,7 +43,7 @@ jobs:
           test "$(uname -sm)" = "Darwin arm64"
           export CARGO_HOME="$RUNNER_TEMP/codex-devices-cargo"
           export RUSTUP_HOME="$RUNNER_TEMP/codex-devices-rustup"
-          installer="$RUNNER_TEMP/codex-devices-rustup-init"
+          installer="$RUNNER_TEMP/rustup-init"
           curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --fail --show-error --silent --location --max-time 120 \
             --output "$installer" \
