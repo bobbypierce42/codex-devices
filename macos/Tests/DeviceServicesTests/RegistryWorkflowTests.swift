@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import DeviceServices
 
@@ -153,6 +154,23 @@ import XCTest
         await restarted.prepare(environmentID: "env-studio", newName: "Another label")
         let events = await fixture.events()
         XCTAssertEqual(events.filter { $0 == "prepare" }.count, 1); XCTAssertEqual(events.filter { $0 == "POST" }.count, 1)
+    }
+    func testFIFOSavedReferenceIsRefusedWithoutBlocking() async throws {
+        let (fixture, parent, model) = try setup()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let path = parent.appendingPathComponent("last-review.json").path
+        XCTAssertEqual(mkfifo(path, 0o600), 0)
+        let rescue = DispatchWorkItem {
+            let fd = open(path, O_WRONLY | O_NONBLOCK)
+            if fd >= 0 { close(fd) }
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: rescue)
+        let start = Date()
+        await model.refresh()
+        rescue.cancel()
+        XCTAssertLessThan(Date().timeIntervalSince(start), 2.5)
+        XCTAssertEqual(model.phase, .uncertain)
+        let events = await fixture.events(); XCTAssertFalse(events.contains("POST"))
     }
     func testUnsafeSavedReferencesRefuseWithoutEngineOrPOST() async throws {
         for variant in 0..<3 {

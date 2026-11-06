@@ -248,7 +248,7 @@ enum RegistryResponseEvidence {
     }
     static func readIfPresent(directory: URL, digest: String, environmentID: String) throws -> Outcome? {
         let dir = try directoryDescriptor(directory); defer { close(dir) }
-        let fd = openat(dir, filename, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = openat(dir, filename, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         if fd < 0 && errno == ENOENT { return nil }
         guard fd >= 0 else { throw ServiceError.uncertain }; defer { close(fd) }; try validate(fd)
         var data = Data(), bytes = [UInt8](repeating: 0, count: 4096)

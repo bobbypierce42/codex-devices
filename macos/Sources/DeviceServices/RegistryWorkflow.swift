@@ -160,7 +160,7 @@ private enum WorkflowReviewReference {
         var info = stat()
         if lstat(parent.path, &info) != 0 { guard errno == ENOENT else { throw ServiceError.refused }; return nil }
         let directory = try RegistryResponseEvidence.directoryDescriptor(parent); defer { close(directory) }
-        let fd = openat(directory, filename, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        let fd = openat(directory, filename, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC)
         if fd < 0 { guard errno == ENOENT else { throw ServiceError.refused }; return nil }
         defer { close(fd) }; try RegistryResponseEvidence.validate(fd)
         var bytes = [UInt8](repeating: 0, count: 4097), data = Data()

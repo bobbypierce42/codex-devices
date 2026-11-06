@@ -23,6 +23,27 @@ final class DiscoverySSHTests: XCTestCase {
         XCTAssertEqual(peer.installationIDHash, DeviceServices.hash(fixtureInstallation))
         XCTAssertEqual(peer.hostKeyFingerprint, "SHA256:fixture")
     }
+    func testInspectionCommandReportsHostnameWithSyntheticIdentity() async throws {
+        let directory = try temporaryDirectory()
+        let identity = directory.appendingPathComponent("synthetic-id")
+        try Data(fixtureInstallation.utf8).write(to: identity)
+        let original = #"p="$HOME/Library/Application Support/Codex/.codex-tpp-local-executor-installation-id""#
+        guard SSHService.inspectionCommand.components(separatedBy: original).count == 2 else {
+            XCTFail("The fixture must replace exactly one identity path")
+            return
+        }
+        let script = SSHService.inspectionCommand.replacingOccurrences(of: original, with: "p=\"\(identity.path)\"")
+        guard !script.contains("$HOME"), !script.contains(".codex-tpp-local-executor-installation-id") else {
+            XCTFail("Inspection test must not access a real identity")
+            return
+        }
+        let result = try await NativeProcess.run(.init(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script]))
+        let hostname = try await NativeProcess.run(.init(executable: URL(fileURLWithPath: "/bin/hostname"), arguments: []))
+        XCTAssertEqual(hostname.status, 0)
+        let peer = try SSHService.parseInspection(result, candidate: fixtureHost, hostKey: nil)
+        XCTAssertEqual(peer.computerName, String(decoding: hostname.output, as: UTF8.self).trimmingCharacters(in: .newlines))
+        XCTAssertEqual(peer.installationIDHash, DeviceServices.hash(fixtureInstallation))
+    }
     func testMaliciousHostNeverStartsProcess() async {
         let service = SSHService(helperURL: URL(fileURLWithPath: "/fixture/helper"), trustDirectory: URL(fileURLWithPath: "/fixture/trust"), runner: { _ in XCTFail("Process must not run"); throw ServiceError.unavailable }, trust: { _ in true })
         await assertServiceError(.invalidInput) { _ = try await service.inspect(HostCandidate(host: "studio;touch bad")) }

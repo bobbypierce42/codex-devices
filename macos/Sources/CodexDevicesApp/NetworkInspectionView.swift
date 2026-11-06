@@ -16,7 +16,7 @@ struct NetworkInspectionView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Find Macs").font(.title2).fontWeight(.semibold)
-                    Text("Optional: discover Macs and inspect their system names. Known account labels can be edited without SSH.")
+                    Text("Optional: discover Macs and inspect their hostnames. Known account labels can be edited without SSH.")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -87,7 +87,7 @@ struct NetworkInspectionView: View {
                     .disabled(busy || (!candidate.isLocal && user.isEmpty))
             }
             if let inspection = coordinator.inspections.first(where: { $0.candidate.id == candidate.id }) {
-                Label("System name: \(inspection.computerName)", systemImage: "checkmark.circle")
+                Label("Hostname: \(inspection.computerName)", systemImage: "checkmark.circle")
                     .textSelection(.enabled)
                 Text("Installation fingerprint: \(inspection.installationIDHash)")
                     .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
@@ -98,9 +98,9 @@ struct NetworkInspectionView: View {
                     HStack {
                         Text("Codex label: \(record.displayName)").font(.callout)
                         Spacer()
-                        Button("Use System Name in Editor") { onUseName(record, representative.computerName) }
+                        Button("Use Hostname in Editor") { onUseName(record, representative.computerName) }
                             .disabled(busy || workflow.isBusy)
-                            .help("Copy the literal inspected system name into the account editor; review is still required")
+                            .help("Copy the inspected hostname into the account editor; review is still required")
                     }
                 } else {
                     Text("No unique editable account registration matches this inspection.")
