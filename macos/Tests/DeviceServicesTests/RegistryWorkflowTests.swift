@@ -88,6 +88,38 @@ import XCTest
         XCTAssertEqual(model.phase, .verified)
         let after = await fixture.events(); XCTAssertEqual(after.filter { $0 == "POST" }.count, 1)
     }
+    func testPreflightDriftRequiresNewBackupAndReviewWithoutSending() async throws {
+        let (fixture, _, model) = try setup()
+        await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
+        let firstDirectory = try XCTUnwrap(model.operationDirectory)
+        let digest = try XCTUnwrap(model.receipt).planSHA256
+        await fixture.addCloudMetadata()
+        await model.applyReviewed(planDigest: digest)
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertTrue(model.message.contains("This attempt did not send a rename request"))
+        XCTAssertTrue(model.message.contains("prepare a new backup and review"))
+        let blocked = await fixture.events(); XCTAssertFalse(blocked.contains("POST"))
+        await model.prepare(environmentID: "env-studio", newName: "Studio")
+        XCTAssertEqual(model.phase, .review)
+        XCTAssertNotEqual(model.operationDirectory, firstDirectory)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstDirectory.appendingPathComponent("engine/before.json").path))
+        await model.applyReviewed(planDigest: try XCTUnwrap(model.receipt).planSHA256)
+        XCTAssertEqual(model.phase, .verified)
+        let events = await fixture.events(); XCTAssertEqual(events.filter { $0 == "POST" }.count, 1)
+    }
+    func testUnsafeResponseWitnessAfterPreflightFailureStaysUncertain() async throws {
+        let (fixture, _, model) = try setup()
+        await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
+        let directory = try XCTUnwrap(model.operationDirectory)
+        let digest = try XCTUnwrap(model.receipt).planSHA256
+        try FileManager.default.createSymbolicLink(at: directory.appendingPathComponent("registry-response.json"), withDestinationURL: URL(fileURLWithPath: "/dev/null"))
+        await fixture.addCloudMetadata()
+        await model.applyReviewed(planDigest: digest)
+        XCTAssertEqual(model.phase, .uncertain)
+        await model.prepare(environmentID: "env-studio", newName: "Another Studio")
+        let events = await fixture.events(); XCTAssertFalse(events.contains("POST"))
+        XCTAssertEqual(events.filter { $0 == "prepare" }.count, 1)
+    }
     func testRestartAfterUnknownResponseRemainsReadbackOnlyAndUncertain() async throws {
         let (fixture, parent, model) = try setup()
         await model.refresh(); await model.prepare(environmentID: "env-studio", newName: "Studio")
@@ -155,7 +187,7 @@ import XCTest
 private actor RegistryWorkflowFixture {
     enum Variant { case personal, cloud, collision }
     private let engine: EngineClient
-    private var name = "Old Studio", lostReply = false, engineFailsAfterPOST = false, intentFailsOnce = false
+    private var name = "Old Studio", lostReply = false, engineFailsAfterPOST = false, intentFailsOnce = false, cloudMetadata = false
     private var variant: Variant = .personal
     private var log = [String](), prepared: JSONValue?
     init(engine: URL) { self.engine = EngineClient(executable: engine) }
@@ -168,10 +200,20 @@ private actor RegistryWorkflowFixture {
     func setLostReply() { lostReply = true }
     func failEngineAfterPOST() { engineFailsAfterPOST = true }
     func failNextIntent() { intentFailsOnce = true }
+    func addCloudMetadata() { cloudMetadata = true }
     private func account() throws -> AccountSession { log.append("account"); return try fixtureAccount() }
     private func capture(_ account: AccountSession) throws -> RegistryCapture {
         log.append("capture")
         let capture = try fixtureCapture(name: name, duplicateID: variant == .collision ? "other-env" : nil)
+        if cloudMetadata {
+            let scopes = try capture.scopes.map { scope -> RegistryCapture.Scope in
+                var response = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(scope.computersResponse.utf8)) as? [String: Any])
+                response["cloud_environment_id"] = "synthetic-cloud"
+                let text = try XCTUnwrap(String(data: JSONSerialization.data(withJSONObject: response), encoding: .utf8))
+                return .init(dotID: scope.dotID, threadID: scope.threadID, computersResponse: text)
+            }
+            return RegistryCapture(accountIDHash: account.accountIDHash, rootResponse: capture.rootResponse, scopes: scopes)
+        }
         if variant != .cloud { return capture }
         let scopes = try capture.scopes.map { scope -> RegistryCapture.Scope in
             let cloud: JSONValue = .object(["environment_id": .string("cloud-record"), "kind": .string("openai_cloud"), "display_name": .string("Cloud"), "computer_type": .null, "installation_id": .null, "status": .null])

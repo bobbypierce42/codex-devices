@@ -107,6 +107,12 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
                 do { try await loadRecords() } catch { message += " The computer list could not be refreshed." }
             } else {
                 receipt = try await runner.review(operationDirectory: directory, planSHA256: digest)
+                if result.exitCode == 3, let receipt, receipt.status == "prepared", receipt.records[0].state == "pending",
+                   try RegistryResponseEvidence.readIfPresent(directory: directory, digest: digest, environmentID: receipt.records[0].environmentID) == nil {
+                    unresolvedReference = false; phase = .failed
+                    message = "This attempt did not send a rename request. Account details may have changed; prepare a new backup and review."
+                    return
+                }
                 if let receipt, receipt.status == "prepared", receipt.records[0].state == "pending",
                    (try? RegistryResponseEvidence.read(directory: directory, digest: digest, environmentID: receipt.records[0].environmentID)) == .unknown {
                     unresolvedReference = false; phase = .review
