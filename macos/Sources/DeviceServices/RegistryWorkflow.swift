@@ -51,8 +51,15 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
                 let saved = try await runner.review(operationDirectory: directory, planSHA256: reference.digest)
                 receipt = saved; operationDirectory = directory
                 if saved.status == "prepared", saved.records[0].state == "pending" {
-                    unresolvedReference = false
-                    phase = .review; message = "A saved review is ready. Check its names and backup before applying."
+                    if reference.attempted {
+                        let response = try RegistryResponseEvidence.readIfPresent(directory: directory, digest: reference.digest, environmentID: saved.records[0].environmentID)
+                        guard response == nil || response == .unknown else { throw ServiceError.uncertain }
+                        unresolvedReference = false; receipt = nil; operationDirectory = nil; phase = .failed
+                        message = "The previous review was attempted but no rename was sent. Prepare a new backup and review."
+                    } else {
+                        unresolvedReference = false
+                        phase = .review; message = "A saved review is ready. Check its names and backup before applying."
+                    }
                 } else if saved.status == "verified", saved.records[0].state == "verified",
                           (try? RegistryResponseEvidence.read(directory: directory, digest: reference.digest, environmentID: saved.records[0].environmentID)) == .accepted {
                     unresolvedReference = false
@@ -88,6 +95,8 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
         guard !isBusy, phase == .review, let receipt, receipt.status == "prepared", receipt.records[0].state == "pending", receipt.planSHA256 == planDigest, let directory = operationDirectory else { message = ServiceError.refused.localizedDescription; return }
         guard begin(.applying) else { return }; defer { isBusy = false }
         unresolvedReference = true
+        do { try WorkflowReviewReference.markAttempted(parent: artifactParent, basename: directory.lastPathComponent, digest: planDigest) }
+        catch { failure(error); return }
         let result = await runner.run(arguments: ["apply", "--operation", directory.path, "--approve-plan-sha256", planDigest])
         await complete(result, directory: directory, digest: planDigest)
     }
@@ -107,8 +116,9 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
                 do { try await loadRecords() } catch { message += " The computer list could not be refreshed." }
             } else {
                 receipt = try await runner.review(operationDirectory: directory, planSHA256: digest)
-                if result.exitCode == 3, let receipt, receipt.status == "prepared", receipt.records[0].state == "pending",
-                   try RegistryResponseEvidence.readIfPresent(directory: directory, digest: digest, environmentID: receipt.records[0].environmentID) == nil {
+                if result.exitCode == 3, let receipt, receipt.status == "prepared", receipt.records[0].state == "pending" {
+                    let response = try RegistryResponseEvidence.readIfPresent(directory: directory, digest: digest, environmentID: receipt.records[0].environmentID)
+                    guard response == nil || response == .unknown else { throw ServiceError.uncertain }
                     unresolvedReference = false; phase = .failed
                     message = "This attempt did not send a rename request. Account details may have changed; prepare a new backup and review."
                     return
@@ -154,7 +164,7 @@ public struct RegistryComputer: Identifiable, Sendable, Equatable {
 }
 
 private enum WorkflowReviewReference {
-    struct Reference { let basename: String; let digest: String }
+    struct Reference { let basename: String; let digest: String; let attempted: Bool }
     private static let filename = "last-review.json"
     static func read(parent: URL) throws -> Reference? {
         var info = stat()
@@ -170,16 +180,28 @@ private enum WorkflowReviewReference {
             if count == 0 { break }; guard data.count + count <= 4096 else { throw ServiceError.refused }; data.append(contentsOf: bytes.prefix(count))
         }
         let value = try JSONValue.parse(data)
-        guard case .object(let fields) = value, Set(fields.keys) == ["operation_basename", "plan_sha256"], let basename = value["operation_basename"].string, UUID(uuidString: basename) != nil, !basename.contains("/"), let digest = value["plan_sha256"].string, isHash(digest) else { throw ServiceError.refused }
-        return Reference(basename: basename, digest: digest)
+        guard case .object(let fields) = value, let basename = value["operation_basename"].string, UUID(uuidString: basename) != nil, !basename.contains("/"), let digest = value["plan_sha256"].string, isHash(digest) else { throw ServiceError.refused }
+        let keys = Set(fields.keys), baseKeys: Set<String> = ["operation_basename", "plan_sha256"]
+        let attempted = value["apply_attempted"] == .bool(true)
+        guard keys == baseKeys || (keys == baseKeys.union(["apply_attempted"]) && attempted) else { throw ServiceError.refused }
+        return Reference(basename: basename, digest: digest, attempted: attempted)
     }
     static func save(parent: URL, basename: String, digest: String) throws {
         _ = try read(parent: parent)
+        try write(parent: parent, basename: basename, digest: digest, attempted: false)
+    }
+    static func markAttempted(parent: URL, basename: String, digest: String) throws {
+        guard let reference = try read(parent: parent), reference.basename == basename, reference.digest == digest else { throw ServiceError.refused }
+        if !reference.attempted { try write(parent: parent, basename: basename, digest: digest, attempted: true) }
+    }
+    private static func write(parent: URL, basename: String, digest: String, attempted: Bool) throws {
         let directory = try RegistryResponseEvidence.directoryDescriptor(parent); defer { close(directory) }
         let temporary = "last-review-next-\(UUID().uuidString).json"
         let fd = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
         guard fd >= 0 else { throw ServiceError.refused }; defer { close(fd) }
-        let data = try JSONValue.object(["operation_basename": .string(basename), "plan_sha256": .string(digest)]).data()
+        var fields: [String: JSONValue] = ["operation_basename": .string(basename), "plan_sha256": .string(digest)]
+        if attempted { fields["apply_attempted"] = .bool(true) }
+        let data = try JSONValue.object(fields).data()
         var offset = 0
         while offset < data.count {
             let count = data.withUnsafeBytes { Darwin.write(fd, $0.baseAddress!.advanced(by: offset), data.count - offset) }
