@@ -12,7 +12,7 @@ This independent project is not affiliated with OpenAI.
 
 - Shows the account's computer registrations, including offline entries.
 - Prepares a private backup and a review before changing one selected label.
-- Optionally finds Macs and compares their system names with account registrations.
+- Optionally finds Macs and compares their hostnames with account registrations.
 
 The label is the name shown in Codex. Changing it does not rename the Mac or
 remove an old registration. Live cleanup is not implemented. Cloud, unsupported,
@@ -82,15 +82,15 @@ The app saves private backups and operation journals in
 contain account metadata. Keep them private. A metadata backup does not promise
 an automatic rollback.
 
-### Compare a Mac's system name
+### Compare a Mac's hostname
 
-To compare with a Mac's system name, use the optional **Find Macs** tab and choose
+To compare with a Mac's hostname, use the optional **Find Macs** tab and choose
 **Scan Network**. Discovery uses Bonjour, an existing Tailscale installation and
 an optional hostname. **Inspect** confirms the exact target and account first.
 Remote inspection uses existing SSH access and explicit host-key trust; changed
 keys refuse. Its secure prompt distinguishes that remote account's password
 from a local SSH key passphrase. Local inspection uses the current Mac account.
-An unambiguous match can copy the inspected system name into the account editor;
+An unambiguous match can copy the hostname reported by `/bin/hostname` into the account editor;
 the same backup and name review still follow. No network inspection starts
 automatically, and custom labels are not rewritten automatically.
 

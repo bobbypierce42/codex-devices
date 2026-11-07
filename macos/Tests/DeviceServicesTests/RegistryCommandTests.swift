@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import DeviceServices
 
@@ -114,6 +115,26 @@ final class RegistryCommandTests: XCTestCase {
             XCTAssertEqual(repeated.exitCode, 3)
             let events = await fixture.events(); XCTAssertEqual(events.filter { $0 == "POST" }.count, 1)
         }
+    }
+    func testFIFOResponseWitnessIsRefusedWithoutBlocking() throws {
+        let directory = try temporaryDirectory()
+        let path = directory.appendingPathComponent("registry-response.json").path
+        XCTAssertEqual(mkfifo(path, 0o600), 0)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            do {
+                _ = try RegistryResponseEvidence.read(directory: directory, digest: String(repeating: "a", count: 64), environmentID: "env-studio")
+                XCTFail("A FIFO cannot be accepted as response evidence")
+            } catch { }
+            finished.signal()
+        }
+        let result = finished.wait(timeout: .now() + 2)
+        if result == .timedOut {
+            let fd = open(path, O_WRONLY | O_NONBLOCK)
+            if fd >= 0 { close(fd) }
+            _ = finished.wait(timeout: .now() + 2)
+        }
+        XCTAssertEqual(result, .success)
     }
     func testExistingWrapperRefusesBeforeAuthenticationAndMissingWitnessCannotVerify() async throws {
         let (fixture, directory) = try setupFixture(), digest = try await prepare(fixture, directory)

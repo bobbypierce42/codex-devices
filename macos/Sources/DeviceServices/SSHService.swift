@@ -129,7 +129,7 @@ public struct SSHService: Sendable {
     printf '%s' "$value" | /usr/bin/grep -Eq '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$' || exit 31
     test ${#value} -eq 36 || exit 31
     test "$size" -eq 36 || { test "$size" -eq 37 && test "$(/usr/bin/tail -c 1 "$p" | /usr/bin/od -An -tu1 | /usr/bin/tr -d ' ')" = 10; } || exit 31
-    name=$(/usr/sbin/scutil --get ComputerName)
+    name=$(/bin/hostname)
     printf '%s' "$name" | /usr/bin/base64 | /usr/bin/tr -d '\n'
     printf '\n'
     printf '%s' "$value" | /usr/bin/shasum -a 256 | /usr/bin/cut -d ' ' -f 1

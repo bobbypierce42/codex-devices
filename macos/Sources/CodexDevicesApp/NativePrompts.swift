@@ -7,9 +7,9 @@ enum NativePrompts {
         let alert = NSAlert()
         alert.messageText = candidate.isLocal ? "Inspect this Mac?" : "Inspect this Mac over SSH?"
         if candidate.isLocal {
-            alert.informativeText = "Mac: \(candidate.name)\nCurrent account on this Mac: \(NSUserName())\n\nRead this Mac's system name and existing installation fingerprint using its current account. No SSH or password is required. This does not change its system name or Codex label."
+            alert.informativeText = "Mac: \(candidate.name)\nCurrent account on this Mac: \(NSUserName())\n\nRead this Mac's hostname and existing installation fingerprint using its current account. No SSH or password is required. This does not change its system name or Codex label."
         } else {
-            alert.informativeText = "Mac: \(candidate.name)\nHost: \(candidate.host)\nAccount on the Mac: \(user)\n\nRead its system name and existing installation fingerprint. This does not change its system name or Codex label. SSH may request authentication in a separate secure window."
+            alert.informativeText = "Mac: \(candidate.name)\nHost: \(candidate.host)\nAccount on the Mac: \(user)\n\nRead its hostname and existing installation fingerprint. This does not change its system name or Codex label. SSH may request authentication in a separate secure window."
         }
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Inspect")
